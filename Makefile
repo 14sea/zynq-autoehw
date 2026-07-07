@@ -8,9 +8,11 @@ BUILD_DIR := build
 HOST_BUILD := $(BUILD_DIR)/host
 RTL_BUILD := $(BUILD_DIR)/rtl
 C_TWIN := $(HOST_BUILD)/uart_stream_cli
-RTL_SMOKE := $(RTL_BUILD)/tb_uart_stream_lfsr.vvp
+RTL_LFSR_SMOKE := $(RTL_BUILD)/tb_uart_stream_lfsr.vvp
+RTL_EVAL_SMOKE := $(RTL_BUILD)/tb_uart_stream_eval_core.vvp
+RTL_EVAL_VECTORS := $(RTL_BUILD)/eval_vectors.txt
 
-.PHONY: all test host-gate c-twin rtl-smoke clean
+.PHONY: all test host-gate c-twin rtl-smoke vivado-ooc clean
 
 all: host-gate rtl-smoke
 
@@ -24,13 +26,24 @@ $(C_TWIN): sw/uart_stream_v1.c sw/uart_stream_v1.h sw/uart_stream_cli.c
 	mkdir -p $(HOST_BUILD)
 	$(CC) $(CFLAGS) -I sw sw/uart_stream_v1.c sw/uart_stream_cli.c -o $@
 
-rtl-smoke: $(RTL_SMOKE)
-	$(VVP) $(RTL_SMOKE)
+rtl-smoke: $(RTL_LFSR_SMOKE) $(RTL_EVAL_SMOKE) $(RTL_EVAL_VECTORS)
+	$(VVP) $(RTL_LFSR_SMOKE)
+	$(VVP) $(RTL_EVAL_SMOKE) +VECTORS=$(RTL_EVAL_VECTORS)
 
-$(RTL_SMOKE): rtl/uart_stream_lfsr.v rtl/tb_uart_stream_lfsr.v
+$(RTL_LFSR_SMOKE): rtl/uart_stream_lfsr.v rtl/tb_uart_stream_lfsr.v
 	mkdir -p $(RTL_BUILD)
 	$(IVERILOG) -g2012 -o $@ rtl/uart_stream_lfsr.v rtl/tb_uart_stream_lfsr.v
 
+$(RTL_EVAL_SMOKE): rtl/uart_stream_eval_core.v rtl/tb_uart_stream_eval_core.v
+	mkdir -p $(RTL_BUILD)
+	$(IVERILOG) -g2012 -o $@ rtl/uart_stream_eval_core.v rtl/tb_uart_stream_eval_core.v
+
+$(RTL_EVAL_VECTORS): host/gen_rtl_eval_vectors.py sim/uart_stream_v1.py
+	mkdir -p $(RTL_BUILD)
+	$(PYTHON) host/gen_rtl_eval_vectors.py --frames 4 --out $@
+
+vivado-ooc:
+	vivado -mode batch -source scripts/vivado_ooc_uart_stream.tcl
+
 clean:
 	rm -rf $(BUILD_DIR)
-
