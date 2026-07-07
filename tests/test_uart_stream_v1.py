@@ -1,0 +1,84 @@
+import subprocess
+import unittest
+from pathlib import Path
+
+from sim.uart_stream_v1 import (
+    DEFAULT_FRAMES,
+    STATIC_BASELINE,
+    SamplerConfig,
+    benchmark_manifest_hash,
+    build_run_log_fixture,
+    condition_set_hash,
+    lfsr16_step,
+    random_baseline_best,
+    random_search_train_only,
+    score_as_rows,
+    score_set,
+)
+
+
+ROOT = Path(__file__).resolve().parents[1]
+BUILD = ROOT / "build" / "host" / "uart_stream_cli"
+
+
+class UartStreamV1Test(unittest.TestCase):
+    def test_lfsr_sequence_matches_rtl_fixture(self):
+        state = 0x1111
+        expected = [0x8888, 0xC444, 0xE222, 0xF111, 0xF888]
+        for want in expected:
+            state = lfsr16_step(state)
+            self.assertEqual(state, want)
+
+    def test_static_baseline_is_deterministic(self):
+        train_a = score_set("train", STATIC_BASELINE, DEFAULT_FRAMES)
+        train_b = score_set("train", STATIC_BASELINE, DEFAULT_FRAMES)
+        self.assertEqual(train_a, train_b)
+        self.assertEqual(len(train_a.conditions), 4)
+
+    def test_holdout_is_final_evaluation_only(self):
+        search = random_search_train_only(budget=8, seed=0xC0DE, frames=8)
+        fixture = build_run_log_fixture(search, frames=8)
+        for generation in fixture["generations"]:
+            self.assertNotIn("holdout_fitness", generation)
+            self.assertIn("best_fitness_train", generation)
+        self.assertIn("holdout_fitness", fixture["final_evaluation"])
+        self.assertIn("random_equal_budget_holdout", fixture["final_evaluation"])
+        self.assertEqual(fixture["header"]["condition_set_hash"], condition_set_hash())
+        self.assertEqual(fixture["header"]["benchmark_manifest_hash"], benchmark_manifest_hash())
+
+    def test_random_baseline_is_post_search_deterministic(self):
+        first = random_baseline_best("holdout", budget=8, seed=0xBEEF, frames=8)
+        second = random_baseline_best("holdout", budget=8, seed=0xBEEF, frames=8)
+        self.assertEqual(first, second)
+
+    def test_c_twin_matches_python_oracle(self):
+        if not BUILD.exists():
+            self.skipTest(f"C twin not built: {BUILD}")
+        configs = [
+            STATIC_BASELINE,
+            SamplerConfig(sample_phase=18, threshold=-12, majority_window=3),
+            SamplerConfig(sample_phase=13, threshold=21, majority_window=5),
+        ]
+        for config in configs:
+            proc = subprocess.run(
+                [
+                    str(BUILD),
+                    str(config.sample_phase),
+                    str(config.threshold),
+                    str(config.majority_window),
+                    str(DEFAULT_FRAMES),
+                ],
+                cwd=ROOT,
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            c_rows = []
+            for line in proc.stdout.strip().splitlines():
+                name, split, passed, frames = line.split()
+                c_rows.append((name, split, int(passed), int(frames)))
+            self.assertEqual(c_rows, score_as_rows(config, DEFAULT_FRAMES))
+
+
+if __name__ == "__main__":
+    unittest.main()
