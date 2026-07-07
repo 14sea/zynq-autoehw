@@ -20,6 +20,7 @@ from sim.uart_stream_v1 import (
 
 ROOT = Path(__file__).resolve().parents[1]
 BUILD = ROOT / "build" / "host" / "uart_stream_cli"
+RUNTIME = ROOT / "build" / "host" / "autoehw_runtime_cli"
 
 
 class UartStreamV1Test(unittest.TestCase):
@@ -58,6 +59,35 @@ class UartStreamV1Test(unittest.TestCase):
         first = random_baseline_best("holdout", budget=8, seed=0xBEEF, frames=8)
         second = random_baseline_best("holdout", budget=8, seed=0xBEEF, frames=8)
         self.assertEqual(first, second)
+
+    def test_c_runtime_matches_python_train_only_search(self):
+        if not RUNTIME.exists():
+            self.skipTest(f"C runtime not built: {RUNTIME}")
+        budget = 16
+        frames = 8
+        seed = 0xC0DE
+        search = random_search_train_only(budget=budget, seed=seed, frames=frames)
+        train = score_set("train", search.best_config, frames)
+        holdout = score_set("holdout", search.best_config, frames)
+        proc = subprocess.run(
+            [str(RUNTIME), str(budget), hex(seed), str(frames)],
+            cwd=ROOT,
+            check=True,
+            text=True,
+            capture_output=True,
+        )
+        fields = proc.stdout.strip().split()
+        self.assertEqual(fields[0], "best")
+        self.assertEqual(
+            tuple(map(int, fields[1:4])),
+            (search.best_config.sample_phase, search.best_config.threshold, search.best_config.majority_window),
+        )
+        self.assertEqual(fields[4], "train")
+        self.assertEqual(tuple(map(int, fields[5:7])), (sum(s.passed for s in train.conditions), 4 * frames))
+        self.assertEqual(fields[7], "holdout")
+        self.assertEqual(tuple(map(int, fields[8:10])), (sum(s.passed for s in holdout.conditions), 4 * frames))
+        self.assertEqual(fields[10], "evals")
+        self.assertEqual(int(fields[11]), budget * 4 * frames)
 
     def test_c_twin_matches_python_oracle(self):
         if not BUILD.exists():

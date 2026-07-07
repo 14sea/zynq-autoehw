@@ -9,6 +9,9 @@ Vivado OOC result or board result is claimed here.
   `uart_stream_v1` train/holdout/adversarial splits.
 - `sw/uart_stream_v1.c` + `sw/uart_stream_cli.c` — portable-C twin used by the
   host gate.
+- `sw/autoehw_runtime.c` + `sw/autoehw_runtime_cli.c` — portable-C train-only
+  autonomous search seed; holdout is evaluated only after the champion config is
+  locked.
 - `rtl/uart_stream_lfsr.v` + `rtl/tb_uart_stream_lfsr.v` — RTL smoke fixture for
   the LFSR sequence shared by the oracle and C twin.
 - `rtl/uart_stream_eval_core.v` + `rtl/tb_uart_stream_eval_core.v` —
@@ -49,7 +52,8 @@ is emitted only in `final_evaluation` after the champion config is locked.
 
 ## Not claimed yet
 
-- No autonomous firmware loop yet.
+- No board-integrated firmware loop yet; the portable-C train-only runtime seed
+  is host-verified.
 - No ICAP write path yet.
 - No Vivado OOC/resource gate yet, only the Tcl entry for Claude to run.
 - No board verification or `docs/board_results.md` entry yet.

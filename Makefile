@@ -8,6 +8,7 @@ BUILD_DIR := build
 HOST_BUILD := $(BUILD_DIR)/host
 RTL_BUILD := $(BUILD_DIR)/rtl
 C_TWIN := $(HOST_BUILD)/uart_stream_cli
+RUNTIME_CLI := $(HOST_BUILD)/autoehw_runtime_cli
 RTL_LFSR_SMOKE := $(RTL_BUILD)/tb_uart_stream_lfsr.vvp
 RTL_EVAL_SMOKE := $(RTL_BUILD)/tb_uart_stream_eval_core.vvp
 RTL_EVAL_VECTORS := $(RTL_BUILD)/eval_vectors.txt
@@ -16,15 +17,21 @@ RTL_EVAL_VECTORS := $(RTL_BUILD)/eval_vectors.txt
 
 all: host-gate rtl-smoke
 
-host-gate: c-twin
+host-gate: c-twin runtime-cli
 	$(PYTHON) -m unittest discover -s tests
 	$(PYTHON) host/run_m1_smoke.py --budget 16 --frames 32 --out $(HOST_BUILD)/m1_run_log_fixture.json
 
 c-twin: $(C_TWIN)
 
+runtime-cli: $(RUNTIME_CLI)
+
 $(C_TWIN): sw/uart_stream_v1.c sw/uart_stream_v1.h sw/uart_stream_cli.c
 	mkdir -p $(HOST_BUILD)
 	$(CC) $(CFLAGS) -I sw sw/uart_stream_v1.c sw/uart_stream_cli.c -o $@
+
+$(RUNTIME_CLI): sw/uart_stream_v1.c sw/uart_stream_v1.h sw/autoehw_runtime.c sw/autoehw_runtime.h sw/autoehw_runtime_cli.c
+	mkdir -p $(HOST_BUILD)
+	$(CC) $(CFLAGS) -I sw sw/uart_stream_v1.c sw/autoehw_runtime.c sw/autoehw_runtime_cli.c -o $@
 
 rtl-smoke: $(RTL_LFSR_SMOKE) $(RTL_EVAL_SMOKE) $(RTL_EVAL_VECTORS)
 	$(VVP) $(RTL_LFSR_SMOKE)
