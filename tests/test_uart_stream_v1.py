@@ -21,6 +21,7 @@ from sim.uart_stream_v1 import (
 ROOT = Path(__file__).resolve().parents[1]
 BUILD = ROOT / "build" / "host" / "uart_stream_cli"
 RUNTIME = ROOT / "build" / "host" / "autoehw_runtime_cli"
+FIRMWARE = ROOT / "build" / "host" / "autoehw_firmware_cli"
 
 
 class UartStreamV1Test(unittest.TestCase):
@@ -88,6 +89,36 @@ class UartStreamV1Test(unittest.TestCase):
         self.assertEqual(tuple(map(int, fields[8:10])), (sum(s.passed for s in holdout.conditions), 4 * frames))
         self.assertEqual(fields[10], "evals")
         self.assertEqual(int(fields[11]), budget * 4 * frames)
+
+    def test_firmware_fake_backend_matches_python_train_only_search(self):
+        if not FIRMWARE.exists():
+            self.skipTest(f"firmware CLI not built: {FIRMWARE}")
+        budget = 16
+        frames = 8
+        seed = 0xC0DE
+        search = random_search_train_only(budget=budget, seed=seed, frames=frames)
+        train = score_set("train", search.best_config, frames)
+        holdout = score_set("holdout", search.best_config, frames)
+        proc = subprocess.run(
+            [str(FIRMWARE), str(budget), hex(seed), str(frames)],
+            cwd=ROOT,
+            check=True,
+            text=True,
+            capture_output=True,
+        )
+        fields = proc.stdout.strip().split()
+        self.assertEqual(fields[0], "firmware")
+        self.assertEqual(fields[1], "best")
+        self.assertEqual(
+            tuple(map(int, fields[2:5])),
+            (search.best_config.sample_phase, search.best_config.threshold, search.best_config.majority_window),
+        )
+        self.assertEqual(fields[5], "train")
+        self.assertEqual(tuple(map(int, fields[6:8])), (sum(s.passed for s in train.conditions), 4 * frames))
+        self.assertEqual(fields[8], "holdout")
+        self.assertEqual(tuple(map(int, fields[9:11])), (sum(s.passed for s in holdout.conditions), 4 * frames))
+        self.assertEqual(fields[11], "evals")
+        self.assertEqual(int(fields[12]), budget * 4 * frames)
 
     def test_c_twin_matches_python_oracle(self):
         if not BUILD.exists():
