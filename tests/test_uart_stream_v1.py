@@ -12,6 +12,7 @@ from sim.uart_stream_v1 import (
     lfsr16_step,
     random_baseline_best,
     random_search_train_only,
+    round_nearest_away_from_zero,
     score_as_rows,
     score_set,
 )
@@ -28,6 +29,13 @@ class UartStreamV1Test(unittest.TestCase):
         for want in expected:
             state = lfsr16_step(state)
             self.assertEqual(state, want)
+
+    def test_rounding_semantics_match_c_twin(self):
+        self.assertEqual(round_nearest_away_from_zero(1.5), 2)
+        self.assertEqual(round_nearest_away_from_zero(2.5), 3)
+        self.assertEqual(round_nearest_away_from_zero(-1.5), -2)
+        self.assertEqual(round_nearest_away_from_zero(-2.5), -3)
+        self.assertEqual(round_nearest_away_from_zero(-0.5), -1)
 
     def test_static_baseline_is_deterministic(self):
         train_a = score_set("train", STATIC_BASELINE, DEFAULT_FRAMES)

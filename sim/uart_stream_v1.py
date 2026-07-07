@@ -10,6 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from hashlib import sha256
 import json
+import math
 from typing import Iterable
 
 
@@ -98,6 +99,13 @@ MAJORITY_OPTIONS = (1, 3, 5)
 STATIC_BASELINE = SamplerConfig(sample_phase=16, threshold=0, majority_window=1)
 
 
+def round_nearest_away_from_zero(value: float) -> int:
+    """Match the C twin's `round_div`: nearest integer, half away from zero."""
+    if value >= 0:
+        return math.floor(value + 0.5)
+    return math.ceil(value - 0.5)
+
+
 def lfsr16_step(state: int) -> int:
     """Xorshift-like 16-bit LFSR used by the Python, C, and RTL smoke paths."""
     state &= 0xFFFF
@@ -145,17 +153,17 @@ def _payload(condition: Condition, frame_idx: int) -> list[int]:
 
 def _ideal_phase(condition: Condition) -> int:
     # Keep the shift small and deterministic: +/-650 ppm moves only a few Q5 taps.
-    return max(0, min(31, 16 + round(condition.baud_ppm / 250)))
+    return max(0, min(31, 16 + round_nearest_away_from_zero(condition.baud_ppm / 250)))
 
 
 def _vote_bit(bit: int, condition: Condition, config: SamplerConfig, state: int) -> tuple[int, int]:
     ideal_phase = _ideal_phase(condition)
     phase_error = abs(config.sample_phase - ideal_phase)
     edge_penalty = EDGE_UNC_SCORE[condition.edge_unc]
-    jitter_penalty = round(condition.jitter_frac * 24)
+    jitter_penalty = round_nearest_away_from_zero(condition.jitter_frac * 24)
     signal = max(6, 34 - (phase_error * 3) - edge_penalty - jitter_penalty)
-    threshold_bias = round(config.threshold / 8)
-    noise_span = 4 + edge_penalty + round(condition.jitter_frac * 32)
+    threshold_bias = round_nearest_away_from_zero(config.threshold / 8)
+    noise_span = 4 + edge_penalty + round_nearest_away_from_zero(condition.jitter_frac * 32)
 
     ones = 0
     for _ in range(config.majority_window):
@@ -164,7 +172,7 @@ def _vote_bit(bit: int, condition: Condition, config: SamplerConfig, state: int)
         signed = signal if bit else -signal
         decoded = 1 if (signed + noise - threshold_bias) >= 0 else 0
         state, flip_rnd = _rand16(state)
-        if flip_rnd < round(condition.flip_prob * 65535):
+        if flip_rnd < round_nearest_away_from_zero(condition.flip_prob * 65535):
             decoded ^= 1
         ones += decoded
 
