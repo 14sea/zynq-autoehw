@@ -63,9 +63,50 @@ scaling factors powers of two so the modulo/divide become shifts (the same class
 of rework as EHW-4.2's 48-DSP → 18-DSP fix in `zynq-ehw`). Any such change must
 re-pass the 144-vector RTL gate and be re-synthesized here.
 
-### Not yet gated
+---
 
-- No pblock/resource-bound assertion in the OOC tcl yet — it reports, it does not
-  fail on a budget. Add a pblock + `report_utilization` threshold check when the
-  DFX island is defined.
+## uart_stream_island_regs (commit 8f38bdd)
+
+MMIO register wrapper (`rtl/uart_stream_island_regs.v`) around
+`uart_stream_eval_core`; the register map matches `sw/uart_stream_regs.h` byte-for-byte.
+
+- **Part:** `xc7z010clg400-1`, `synth_design -mode out_of_context`, top =
+  `uart_stream_island_regs`
+- **Verdict:** **PASS** — **0 errors, 0 critical warnings**, 12 warnings (same
+  benign classes as the core: trimmed `tmp_*` temporaries + OOC no-BUFG/no-XDC
+  clock notes).
+- **Date:** 2026-07-07
+
+### Utilization
+
+| Resource | Used | Avail | % | Δ vs bare core |
+|---|---|---|---|---|
+| Slice LUTs | 3480 | 17600 | 19.77 | +109 (MMIO decode) |
+| Slice Registers (FF) | 866 | 35200 | 2.46 | +128 (register file) |
+| DSP48E1 | 3 | 80 | 3.75 | +0 |
+| Block RAM Tile | 0 | 60 | 0.00 | +0 |
+
+The wrapper adds only the register file + address decode over the evaluator core;
+the 3371-LUT core still dominates, so the shrink note above applies unchanged.
+Timing again not meaningful in OOC-no-XDC mode (real timing at island build,
+FCLK0=50 MHz).
+
+### Register/backend contract cross-check (host-side)
+
+`sw/uart_stream_regs.h` offsets and `CTRL`/`STATUS` bit definitions match the RTL
+decode in `uart_stream_island_regs.v` (CTRL bit0=start / bit1=clear-done; STATUS
+bit0=busy / bit1=done / bit2=pass). The `tb_uart_stream_island_regs` smoke drives
+this path and returns `status=0x6` (done+pass) on a known-passing vector. The
+`autoehw_mmio_backend` write/poll sequence (clear-done → start → poll STATUS.DONE
+with timeout) is consistent with the RTL; it is **compiled and host-consistent
+only — not yet board-verified** (no real base address bound, no silicon).
+
+---
+
+## Not yet gated
+
+- No pblock/resource-bound assertion in either OOC tcl yet — they report, they do
+  not fail on a budget. Add a pblock + `report_utilization` threshold check when
+  the DFX island is defined.
 - No place/route, no timing signoff, no board result.
+- `autoehw_mmio_backend` base address / timeout not yet bound to a real island.
