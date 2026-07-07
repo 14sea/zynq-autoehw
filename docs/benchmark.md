@@ -62,8 +62,8 @@ self-checking on-board with no golden transmission needed.
 ## 3. The split
 
 Three disjoint stimulus sets. The training set is the only thing evolution scores
-against; **Claim C is tested on the holdout set**, and the adversarial set is a
-stress/anti-cheat probe.
+against during search; **Claim C is tested on the holdout set only after the
+search is locked**, and the adversarial set is a stress/anti-cheat probe.
 
 ### 3.1 Training set (`train`)
 
@@ -79,8 +79,9 @@ Conditions evolution is allowed to optimize against.
 ### 3.2 Holdout set (`holdout`) — never seen during evolution
 
 Different baud offsets, jitter patterns, seeds, and packet lengths. Used **only**
-to score a champion after evolution. A champion that improves `train` but not
-`holdout` **falsifies Claim C**.
+to score a frozen champion after evolution. No candidate selection, mutation-rate
+tuning, early stopping, or human "one more run" decision may use `holdout`
+results. A champion that improves `train` but not `holdout` **falsifies Claim C**.
 
 | # | baud_ppm | jitter_frac | flip_prob | edge_unc | packet_len | lfsr_seed |
 |---|---|---|---|---|---|---|
@@ -146,13 +147,19 @@ A PC-supplied search seed is test-mode only (Claim A).
 | Word class | Meaning |
 |---|---|
 | `gen`, `best_fitness(train)` | live convergence on the training set |
-| `holdout_fitness` | scored on `holdout` at champion checkpoints |
 | `evals`, `evals_per_sec` | measured throughput (M1 PASS needs this *before* the long run) |
 | `write_counter` | cumulative NV writes vs `write_budget` |
 | event words: `new_champion`, `candidate_rejected`, `recovery` | bounded out-of-band events |
+| `final_holdout_fitness` | emitted only after search is locked and the champion is frozen |
 
 A run whose telemetry cannot distinguish "slow progress" from "stuck" fails
 Claim A regardless of final fitness.
+
+**Holdout firewall.** During the autonomous search loop, the board may report
+`best_fitness_train` and operational telemetry only. `holdout_fitness` belongs to
+the final evaluation record after the champion genome and phenotype hash are
+frozen. If a run uses holdout results to guide candidate choice, tune parameters,
+or decide whether to continue, it is a training result, not a Claim C result.
 
 ---
 
@@ -172,8 +179,8 @@ thresholds:
   beats_random: margin_gt_noise_band
   beats_static: true
   reward_hack_probe: payload_sensitivity
-telemetry_fields: [gen, best_fitness_train, holdout_fitness, evals,
-                   evals_per_sec, write_counter, events]
+telemetry_fields: [gen, best_fitness_train, evals, evals_per_sec,
+                   write_counter, events, final_holdout_fitness]
 frozen_numeric_bands: pending_M1_measurement   # -> uart_stream_v1.1
 ```
 

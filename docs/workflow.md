@@ -78,8 +78,9 @@ Run before every commit; all must pass:
 3. **[Δ] FCLK0 preflight** (board runs only) — FCLK0 pinned to 50 MHz before
    `fpga loadb` (miner FSBL default is 125 MHz; mismatch caused EHW-5.2 wrong
    answers).
-4. **Isolation** — `git -C <each sibling repo> status -s` empty (sources
-   untouched).
+4. **Isolation** — each sibling repo has no tracked-file changes; the only
+   tolerated untracked files are local handoff notes matching `review.vN.txt`.
+   Any source change, build output, or unexpected untracked artifact is a stop.
 5. **gitignore sanity** — no `external/`, `runs/`, `__pycache__/`, no staged file
    > ~500 KB.
 6. **[Δ] Schema conformance** — any new/changed artifact validates against its
@@ -97,8 +98,8 @@ Run before every commit; all must pass:
   push** (human reviews first).
 - Commit attribution is honest: state who authored vs who board-tested in the
   body. `Co-Authored-By: Claude` trailer.
-- Remote: none yet. Before adding one, confirm branch is `main` (not `master`),
-  and confirm the `.gitignore` excludes `external/`, `ref/`, `runs/`.
+- Remote: `origin` is `git@github.com:14sea/zynq-autoehw.git`. Branch is `main`;
+  before any push, confirm `.gitignore` excludes `external/`, `ref/`, `runs/`.
 
 ## Milestone ladder
 

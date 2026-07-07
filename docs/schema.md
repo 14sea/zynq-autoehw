@@ -12,6 +12,11 @@ Field encodings are little-endian unless a field says otherwise. All schemas are
 shown as YAML for readability; the on-board/on-wire form may be a packed binary
 whose layout is pinned by the `genome_contract` / `phenotype_manifest`.
 
+**Freeze point:** this M0 document defines the initial `1.0.0` contracts. Review
+edits made before the first M1 validators and conformance fixtures exist are part
+of that initial freeze. After those fixtures land, the compatibility policy above
+is mandatory for every schema change.
+
 Each schema below is versioned **independently** (they evolve at different rates).
 
 ---
@@ -123,8 +128,9 @@ unknown_combination_policy: hold    # unknown != compatible
 
 ## 4. `run_log` — schema_version 1.0.0
 
-The per-run evidence record. One header + a stream of generation records. Must be
-sufficient — alone — to reproduce a reported champion (else Claim A fails).
+The per-run evidence record. One header + a stream of generation records. Must
+pin every artifact needed to reproduce a reported champion by id, version, and
+hash (else Claim A fails).
 
 ```yaml
 schema: run_log
@@ -136,33 +142,61 @@ header:
   temperature_c: 41.0               # if telemetry available, else null
   manifest_id: uart_sampler_island_v1
   benchmark_id: uart_stream_v1      # -> docs/benchmark.md
+  benchmark_version: "1.0.0"
+  benchmark_manifest_hash: <sha256 of the frozen benchmark manifest>
+  condition_set_hash: <sha256 of train/holdout/adversarial tuples>
+  whitelist_id: whitelist_uart_sampler_v1
+  blacklist_id: bl_uart_sampler_v1
+  local_map_id: null                # null until Claim B work enables a map
+  write_budget_ref: write_budget_uart_sampler_v1
   search_seed: 0x0000C0DE           # FIRST-CLASS field (Claim A)
   seed_source: local_entropy        # local_entropy | pc_supplied(test-mode)
   persistent_store: {type: nand_partition, ref: mtdX, write_budget: 1000}
   schema_versions:                  # pin every consumed schema
     genome_contract: "1.0.0"
     phenotype_manifest: "1.0.0"
+    benchmark_package: "1.0.0"
+    safety_whitelist: "1.0.0"
+    blacklist: "1.0.0"
+    write_budget: "1.0.0"
+    local_map: null
 generations:
   - gen: 0
     best_genome_hash: <sha256>
-    best_fitness: 0.71
+    best_fitness_train: 0.71
     phenotype_hash: <sha256>        # frame-diff hash of the instantiated best
     mailbox_words: [0xF4F00028]
     frame_diff_hash: <sha256>
     write_counter: 3                # cumulative NV writes so far
-    holdout_fitness: 0.66           # measured on the holdout split
     evals: 512
     evals_per_sec: 1840
 events:                             # bounded, out-of-band
   - {gen: 7, kind: new_champion, write_counter: 4}
   - {gen: 22, kind: candidate_rejected, reason: safety_gate, blacklist_ref: bl_09}
   - {gen: 40, kind: recovery, method: golden_reload}
+final_evaluation:                   # emitted only after search is locked
+  locked_gen: 40
+  champion_genome_hash: <sha256>
+  champion_phenotype_hash: <sha256>
+  train_fitness: 0.71
+  holdout_fitness: 0.66
+  adversarial_report_hash: <sha256>
+  random_equal_budget_holdout: 0.52
+  static_baseline_holdout: 0.58
+  noise_band: 0.02
 ```
 
 **Required fields (Claim A / M1 PASS):** `search_seed`, `seed_source`,
-`persistent_store` + `write_budget`, per-gen `holdout_fitness`, `evals_per_sec`,
-`phenotype_hash`. A run log missing any of these cannot support the autonomy
+`persistent_store` + `write_budget`, `benchmark_version`,
+`benchmark_manifest_hash`, `condition_set_hash`, per-gen `best_fitness_train`,
+`evals_per_sec`, `phenotype_hash`, and a post-search `final_evaluation` with
+`holdout_fitness`. A run log missing any of these cannot support the autonomy
 claim.
+
+**Holdout firewall:** `holdout_fitness` is forbidden in `generations`. It appears
+only in `final_evaluation`, after the champion genome and phenotype hash are
+locked. If holdout results influence selection, tuning, or run continuation, the
+record cannot support Claim C.
 
 ---
 
@@ -226,6 +260,7 @@ unbounded writes (Claim A falsifier).
 ```yaml
 schema: write_budget
 schema_version: "1.0.0"
+budget_id: write_budget_uart_sampler_v1
 store: {type: nand_partition, ref: mtdX}
 endurance_estimate_cycles: 100000    # datasheet or conservative
 per_run_budget: 1000                 # hard cap; run aborts persistence at cap
@@ -251,22 +286,46 @@ schema_version: "1.0.0"
 bundle_id: replay_run_2026_07_09_a_champion
 contents:
   genome: <bytes or path>
-  genome_contract_ref: "1.0.0"
-  phenotype_manifest_ref: uart_sampler_island_v1
+  genome_contract_ref:
+    id: uart_sampler_v1
+    schema_version: "1.0.0"
+    sha256: <sha256>
+  phenotype_manifest_ref:
+    id: uart_sampler_island_v1
+    schema_version: "1.0.0"
+    sha256: <sha256>
+  safety_whitelist_ref:
+    id: whitelist_uart_sampler_v1
+    schema_version: "1.0.0"
+    sha256: <sha256>
+  benchmark_ref:
+    id: uart_stream_v1
+    schema_version: "1.0.0"
+    manifest_sha256: <sha256>
+    condition_set_sha256: <sha256>
+  local_map_ref: null                # or {id, schema_version, sha256}
+  blacklist_ref: {id: bl_uart_sampler_v1, schema_version: "1.0.0", sha256: <sha256>}
+  write_budget_ref: {id: write_budget_uart_sampler_v1, schema_version: "1.0.0", sha256: <sha256>}
+  run_log_ref: {id: run_2026_07_09_a, schema_version: "1.0.0", sha256: <sha256>}
   expected_mailbox_words: [0xF4F00028]
   framebank: <optional path>          # if ICAP instantiation is part of replay
   load_run_script: replay.sh
   search_seed: 0x0000C0DE
-  benchmark_id: uart_stream_v1
+  artifact_hashes:
+    base_bitstream_sha256: <sha256>
+    champion_frame_diff_sha256: <sha256>
+    replay_script_sha256: <sha256>
 verification:
   mode: deterministic                 # deterministic | autonomous_discovery
+  expected_train_fitness: 0.71
   expected_holdout_fitness: 0.66
   bit_match_required: true            # champion phenotype must reproduce bit-exact
 ```
 
 **Replay-conformance gate:** a champion is only "reported" if this bundle
-reproduces it from artifacts alone. If reproduction needs uncommitted local
-state, the champion does not count.
+reproduces it from artifacts alone. All contract, benchmark, whitelist, optional
+map, run-log, bitstream, frame-diff, and script inputs are pinned by version and
+hash. If reproduction needs uncommitted local state, the champion does not count.
 
 ---
 
