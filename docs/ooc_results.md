@@ -156,3 +156,34 @@ ports need an explicit `wire`/`reg` net type, not bare `input`/`output`. Keep th
   the DFX island is defined.
 - No place/route, no timing signoff, no board result.
 - `autoehw_mmio_backend` base address / timeout not yet bound to a real island.
+
+---
+
+## eval_core arithmetic-determinism fix (commit 8ba1413) — OOC **FIT FAIL** (pre-build gate)
+
+The sim-vs-synth arithmetic rework (explicit `round_div_s32`, and the `%` operator
+replaced by a hand-written 16-iteration restoring-division `mod_u16_by_u6`) is
+functionally correct (host 384-vector gate PASS) and synthesizes 0 err/0 crit, but
+the manual restoring-division is **much larger** than the Vivado-inferred divider
+it replaced:
+
+| module | before (smoke #2) | after 8ba1413 |
+|---|---|---|
+| `uart_stream_eval_core` | 3371 LUT | **4654 LUT** |
+| `uart_stream_island_regs` | 3480 LUT | 4772 LUT |
+| `tpu_rp` (the RM) | 3490 LUT | **4781 LUT** |
+
+**Blocker:** the DFX RP pblock (`pblock_rp`, `SLICE_X22Y0:SLICE_X43Y49` = 1100
+slices = **4400 LUT6**) cannot hold a 4781-LUT RM. The DFX build would fail
+placement. **Caught by the OOC gate before the ~25-min DFX build** — its purpose.
+
+**Recommendation to the RTL owner (avoids a golden re-baseline):** keep the modulo
+numerically exact but drop the hand-rolled restoring division. The real sim-vs-synth
+cause was the *mixed signed/unsigned* operands, not the `%` operator itself — so
+keep Vivado's inferred `%` (which was compact, part of the original 3371 LUT) but
+make its operands **explicitly unsigned with fixed width** (e.g.
+`{16'd0,tmp_state1} % {26'd0, divisor6}` with both unsigned), matching the oracle's
+unsigned remainder. That removes the ambiguity *and* fits the pblock. A 2^k-scaling
+rework would also shrink it but would change the numbers and force a golden
+re-baseline — not preferred. (If a bigger footprint is truly needed, the RP pblock
+could be enlarged, but keeping the RM ≤4400 LUT is the clean path.)
