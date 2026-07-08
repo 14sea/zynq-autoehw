@@ -92,12 +92,14 @@ Host-stub default page:
 
 ```text
 C0010006 C101000F C1406400 C1811020 C1C00001 C1010101 C1410101 C2A505CF
+C0020006 C1020078 C1400020 C1BC8000 C1C0002B C117E400 C1400001 C28C1693
 ```
 
 Seeded-restore host-stub page:
 
 ```text
 C0010006 C101000F C1406400 C1811020 C1C10101 C1010101 C1410101 C2A404CF
+C0020006 C1020078 C1400020 C1BC8000 C1C0002B C117E400 C1400001 C28C1693
 ```
 
 On board, the second page data word mirrors the measured `AE` payload, so it and
@@ -105,6 +107,19 @@ the `C2` checksum will change with real evals/sec. Verify the page framing, data
 count, sequence counters, fixed fields, and checksum recomputed from the decoded
 payloads. The sequence counter prevents adjacent equal payloads (for example
 reject/recovery `0x010101`) from collapsing in a latched-register poll.
+
+Page id 2 is the long-run budget derivation scaffold. It does not run the long
+window; it records the formula inputs/outputs for a two-hour target:
+
+| Payload | Meaning |
+|---|---|
+| `0x020078` | page version 2, target 120 minutes |
+| `0x000020` | 32 train frame-evals per candidate (`4 train conditions * 8 frames`) |
+| `evals_lo/evals_hi` | `(measured_evals_per_sec * 7200)` split into 22-bit chunks |
+| `budget_lo/budget_hi` | `target_evals / 32` split into 22-bit chunks |
+
+For the host fake speed `0x6400`, this is 184,320,000 frame-evals and 5,760,000
+candidates. On board, these fields must be recomputed from the observed `AE`.
 
 Checker:
 

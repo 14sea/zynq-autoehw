@@ -34,7 +34,10 @@
 #define MBOX_PAGE_DATA_TAG 0xC1000000u
 #define MBOX_PAGE_END_TAG 0xC2000000u
 #define AUTOEHW_PAGE_ID_SUMMARY 1u
+#define AUTOEHW_PAGE_ID_LONGRUN 2u
 #define AUTOEHW_LEGACY_WORD_COUNT 15u
+#define AUTOEHW_LONGRUN_TARGET_SECONDS 7200u
+#define AUTOEHW_TRAIN_EVALS_PER_CANDIDATE (4u * AUTOEHW_BOARD_FRAMES)
 #define AUTOEHW_RANDOM_BASELINE_SEED 0xBEEFu
 #define AUTOEHW_FCLK_HZ 50000000u
 #define AUTOEHW_WRITE_BUDGET 1000u
@@ -144,12 +147,21 @@ static uint32_t page_checksum(uint32_t page_id, const uint32_t *payloads, int co
     return acc & 0x00FFFFFFu;
 }
 
-static int append_summary_page(uint32_t *ev, int idx, int max_words) {
-    uint32_t payloads[6];
-    int payload_count = (int)(sizeof(payloads) / sizeof(payloads[0]));
+static int append_page(uint32_t *ev, int idx, int max_words, uint32_t page_id, const uint32_t *payloads, int payload_count) {
     if (idx + payload_count + 2 > max_words) {
         return idx;
     }
+    ev[idx++] = MBOX_PAGE_HEADER_TAG | ((page_id & 0xFFu) << 16) | (uint32_t)payload_count;
+    for (int i = 0; i < payload_count; i++) {
+        ev[idx++] = MBOX_PAGE_DATA_TAG | (((uint32_t)i & 0x03u) << 22) | (payloads[i] & 0x003FFFFFu);
+    }
+    ev[idx++] = MBOX_PAGE_END_TAG | page_checksum(page_id, payloads, payload_count);
+    return idx;
+}
+
+static int append_summary_page(uint32_t *ev, int idx, int max_words) {
+    uint32_t payloads[6];
+    int payload_count = (int)(sizeof(payloads) / sizeof(payloads[0]));
     payloads[0] = (0x01u << 16) | AUTOEHW_LEGACY_WORD_COUNT;
     payloads[1] = ev[7] & 0x00FFFFFFu;
     payloads[2] = ev[8] & 0x00FFFFFFu;
@@ -157,12 +169,24 @@ static int append_summary_page(uint32_t *ev, int idx, int max_words) {
     payloads[4] = ev[13] & 0x00FFFFFFu;
     payloads[5] = ev[14] & 0x00FFFFFFu;
 
-    ev[idx++] = MBOX_PAGE_HEADER_TAG | ((AUTOEHW_PAGE_ID_SUMMARY & 0xFFu) << 16) | (uint32_t)payload_count;
-    for (int i = 0; i < payload_count; i++) {
-        ev[idx++] = MBOX_PAGE_DATA_TAG | (((uint32_t)i & 0x03u) << 22) | (payloads[i] & 0x003FFFFFu);
-    }
-    ev[idx++] = MBOX_PAGE_END_TAG | page_checksum(AUTOEHW_PAGE_ID_SUMMARY, payloads, payload_count);
-    return idx;
+    return append_page(ev, idx, max_words, AUTOEHW_PAGE_ID_SUMMARY, payloads, payload_count);
+}
+
+static int append_longrun_page(uint32_t *ev, int idx, int max_words) {
+    uint32_t payloads[6];
+    uint64_t evals_per_sec = (uint64_t)(ev[7] & 0x00FFFFFFu);
+    uint64_t target_evals = evals_per_sec * (uint64_t)AUTOEHW_LONGRUN_TARGET_SECONDS;
+    uint64_t candidate_budget = target_evals / (uint64_t)AUTOEHW_TRAIN_EVALS_PER_CANDIDATE;
+    int payload_count = (int)(sizeof(payloads) / sizeof(payloads[0]));
+
+    payloads[0] = (0x02u << 16) | (AUTOEHW_LONGRUN_TARGET_SECONDS / 60u);
+    payloads[1] = AUTOEHW_TRAIN_EVALS_PER_CANDIDATE;
+    payloads[2] = (uint32_t)(target_evals & 0x003FFFFFu);
+    payloads[3] = (uint32_t)((target_evals >> 22) & 0x003FFFFFu);
+    payloads[4] = (uint32_t)(candidate_budget & 0x003FFFFFu);
+    payloads[5] = (uint32_t)((candidate_budget >> 22) & 0x003FFFFFu);
+
+    return append_page(ev, idx, max_words, AUTOEHW_PAGE_ID_LONGRUN, payloads, payload_count);
 }
 
 static uint32_t champion_store_checksum(uint32_t magic, uint32_t meta, uint32_t config, uint32_t budget) {
@@ -275,7 +299,7 @@ int autoehw_board_main(void) {
 
     champion_store_t champion_store = {0, {16, 0, 1}, 0, AUTOEHW_WRITE_BUDGET};
     champion_store_t restored_store = {0, {16, 0, 1}, 0, AUTOEHW_WRITE_BUDGET};
-    uint32_t ev[24];
+    uint32_t ev[32];
     int ev_count;
     uint64_t start_cycles;
     uint64_t end_cycles;
@@ -328,6 +352,7 @@ int autoehw_board_main(void) {
     ev[13] = MBOX_REJECT_EVENT_TAG | bad_candidate_reject_event();
     ev[14] = MBOX_RECOVERY_EVENT_TAG | run_bad_candidate_recovery_probe(&backend, result.best_config);
     ev_count = append_summary_page(ev, (int)AUTOEHW_LEGACY_WORD_COUNT, (int)(sizeof(ev) / sizeof(ev[0])));
+    ev_count = append_longrun_page(ev, ev_count, (int)(sizeof(ev) / sizeof(ev[0])));
     for (int i = 2; i < ev_count; i++) {
         publish(ev[i]);
     }

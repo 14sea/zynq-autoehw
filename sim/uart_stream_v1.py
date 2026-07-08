@@ -21,7 +21,10 @@ CHAMPION_STORE_MAGIC = 0x43484D50
 CHAMPION_STORE_VERSION = 0x00010000
 CHAMPION_STORE_SALT = 0x9E3779B9
 SUMMARY_PAGE_ID = 1
+LONGRUN_PAGE_ID = 2
 LEGACY_MAILBOX_WORD_COUNT = 15
+LONGRUN_TARGET_SECONDS = 7200
+TRAIN_EVALS_PER_CANDIDATE = 4 * 8
 
 
 @dataclass(frozen=True)
@@ -319,6 +322,27 @@ def summary_mailbox_page(
     return tuple(f"0x{word:08X}" for word in words)
 
 
+def mailbox_page_words(page_id: int, payloads: tuple[int, ...]) -> tuple[str, ...]:
+    words = [0xC0000000 | ((page_id & 0xFF) << 16) | len(payloads)]
+    words.extend(0xC1000000 | ((idx & 0x03) << 22) | (payload & 0x3FFFFF) for idx, payload in enumerate(payloads))
+    words.append(0xC2000000 | mailbox_page_checksum(page_id, payloads))
+    return tuple(f"0x{word:08X}" for word in words)
+
+
+def longrun_mailbox_page(evals_per_sec_payload: int = 0x006400) -> tuple[str, ...]:
+    target_evals = evals_per_sec_payload * LONGRUN_TARGET_SECONDS
+    candidate_budget = target_evals // TRAIN_EVALS_PER_CANDIDATE
+    payloads = (
+        (0x02 << 16) | (LONGRUN_TARGET_SECONDS // 60),
+        TRAIN_EVALS_PER_CANDIDATE,
+        target_evals & 0x3FFFFF,
+        (target_evals >> 22) & 0x3FFFFF,
+        candidate_budget & 0x3FFFFF,
+        (candidate_budget >> 22) & 0x3FFFFF,
+    )
+    return mailbox_page_words(LONGRUN_PAGE_ID, payloads)
+
+
 def condition_set_hash() -> str:
     return sha256(
         json.dumps([condition.__dict__ for condition in CONDITIONS], sort_keys=True).encode()
@@ -457,6 +481,7 @@ def build_replay_bundle_fixture(
             "0xB4010101",
             "0xB5010101",
             *summary_mailbox_page(),
+            *longrun_mailbox_page(),
         ],
         "artifacts": {
             "benchmark_manifest_hash": benchmark_manifest_hash(),

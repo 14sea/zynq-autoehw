@@ -13,6 +13,7 @@ from sim.uart_stream_v1 import (
     champion_store_words,
     condition_set_hash,
     lfsr16_step,
+    longrun_mailbox_page,
     random_baseline_best,
     random_search_train_only,
     round_nearest_away_from_zero,
@@ -86,7 +87,8 @@ class UartStreamV1Test(unittest.TestCase):
             "0xAC000200",
         ])
         self.assertEqual(replay["expected_mailbox_words"][8], "0xAF011020")
-        self.assertEqual(replay["expected_mailbox_words"][-8:], list(summary_mailbox_page()))
+        self.assertEqual(replay["expected_mailbox_words"][-16:-8], list(summary_mailbox_page()))
+        self.assertEqual(replay["expected_mailbox_words"][-8:], list(longrun_mailbox_page()))
         self.assertIn("sha256", replay["artifacts"]["run_log_ref"])
         self.assertIn("sha256", replay["artifacts"]["write_budget_ref"])
 
@@ -181,8 +183,16 @@ class UartStreamV1Test(unittest.TestCase):
             0xC1010101,
             0xC1410101,
             0xC2A505CF,
+            0xC0020006,
+            0xC1020078,
+            0xC1400020,
+            0xC1BC8000,
+            0xC1C0002B,
+            0xC117E400,
+            0xC1400001,
+            0xC28C1693,
         ])
-        self.assertEqual(len(words), 23)
+        self.assertEqual(len(words), 31)
         check = subprocess.run(
             ["python3", "host/check_m1_mailbox.py"],
             cwd=ROOT,
@@ -230,8 +240,16 @@ class UartStreamV1Test(unittest.TestCase):
             0xC1010101,
             0xC1410101,
             0xC2A404CF,
+            0xC0020006,
+            0xC1020078,
+            0xC1400020,
+            0xC1BC8000,
+            0xC1C0002B,
+            0xC117E400,
+            0xC1400001,
+            0xC28C1693,
         ])
-        self.assertEqual(len(words), 23)
+        self.assertEqual(len(words), 31)
         check = subprocess.run(
             ["python3", "host/check_m1_mailbox.py"],
             cwd=ROOT,
