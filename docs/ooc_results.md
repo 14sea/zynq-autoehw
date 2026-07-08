@@ -103,6 +103,52 @@ only — not yet board-verified** (no real base address bound, no silicon).
 
 ---
 
+## tpu_rp_rm_uart_stream — XBUS RM wrapper (commit 45a8ce3, synth-fixed)
+
+DFX reconfigurable-module wrapper (`rtl/dfx/tpu_rp_rm_uart_stream.v`, module
+`tpu_rp`) that keeps the zynq-ehw NEORV32 XBUS port contract and wraps
+`uart_stream_island_regs` (island base 0xF0000000).
+
+- **Part:** `xc7z010clg400-1`, `synth_design -mode out_of_context`, top = `tpu_rp`
+- **Verdict:** **PASS after a Claude synth-fix** — see below. Post-fix: **0 errors,
+  0 critical warnings**, 61 warnings (benign: wide unused XBUS bits — `xbus_sel`
+  fanin, tied handshake nets — plus the inherited eval-core temporaries and OOC
+  no-BUFG/no-XDC clock notes).
+- **Date:** 2026-07-08
+
+### Utilization
+
+| Resource | Used | Avail | % |
+|---|---|---|---|
+| Slice LUTs | 3487 | 17600 | 19.81 |
+| Slice Registers (FF) | 867 | 35200 | 2.46 |
+| DSP48E1 | 3 | 80 | 3.75 |
+| Block RAM Tile | 0 | 60 | 0.00 |
+
+Essentially the island_regs wrapper cost (3480 LUT) plus the XBUS ack handshake.
+
+### Synth-fix applied by the OOC gate (iverilog-passed, Vivado-rejected)
+
+As delivered, the module declared `` `default_nettype none `` (line 1) but wrote
+its ports in bare Verilog-2001 style (`input clk`, `output [31:0] xbus_dat_r`,
+…). Icarus accepts this and the RTL smoke passed, but Vivado synth **failed with
+21 errors** (`[Synth 8-6735] net type must be explicitly specified … when
+default_nettype is none` / `[Synth 8-9844] non-net port cannot be of mode
+input`). The two older RTL files avoided this by using explicit `input wire` /
+`output reg`; only this new wrapper regressed.
+
+**Fix (Claude, mechanical):** made every port explicit `input wire` / `output
+wire`. Behavior unchanged — the RTL smoke still returns `status=0x6`. This is the
+same class as the EHW-1.1-fabric lesson in `zynq-ehw`: *iverilog accepts what
+Vivado synth rejects; the OOC gate is the real gate for board-bound RTL.*
+
+**Note for ChatGPT:** when a module sets `` `default_nettype none ``, all module
+ports need an explicit `wire`/`reg` net type, not bare `input`/`output`. Keep the
+`input wire` / `output wire` style already used in `uart_stream_eval_core.v` and
+`uart_stream_island_regs.v`.
+
+---
+
 ## Not yet gated
 
 - No pblock/resource-bound assertion in either OOC tcl yet — they report, they do
