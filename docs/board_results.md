@@ -283,3 +283,32 @@ RAM and would not survive a full reconfiguration or power cycle. NV champion
 storage (QSPI/SD/NAND) with a real write budget remains open for full M1, along
 with: multi-hour run with derived budget, board-side replay bundle emission,
 beats-random headroom, and bad-candidate rejection + recovery.
+
+---
+
+## M1-full bad-candidate rejection + recovery scaffold (2026-07-08) — **PASS ✅ (scaffold scope)**
+
+Bitstream rebuilt with ChatGPT's rejection/recovery scaffold (commit `e8ad35c`;
+RTL untouched — OOC/fit stands). verify-image OK, `dfx_top.bit` md5 `5598d4dc…`.
+FCLK0=50 preflight PASS, `fpga loadb` from the existing U-Boot prompt.
+
+### Observed — ALL 15 WORDS, first roll
+
+First 13 words unchanged (default-mode tail `B2000001/B3000000`; measured
+`0xAE0076E4` = 30 436 evals/sec, consistent with the 30–32k band). New tail:
+
+| # | Observed | Meaning | Verdict |
+|---|---|---|---|
+| 14 | `0xB4010101` | injected illegal-but-safe config (phase=99/thr=0/maj=4) **rejected by the safety gate before eval** | ✅ exact |
+| 15 | `0xB5010101` | post-rejection recovery probe: golden champion re-run through the **real fabric backend** (T0 frame 2) passes — known-good path intact | ✅ exact |
+
+Steady 15-word carousel, 2+ cycles, no extras.
+
+### Scope (explicit)
+
+This is the **event/recovery scaffold**: a config-level safety gate rejects an
+invalid candidate pre-eval, and a known-good probe confirms the evaluator path
+is undamaged afterwards. It is **not** the full M1 recovery claim (raw-bitstream
+bad candidate + ICAP/golden reload without power-cycle). Full-M1 remainder:
+NV champion store + real write budget, multi-hour run with derived budget,
+board-side replay bundle emission, beats-random headroom.
