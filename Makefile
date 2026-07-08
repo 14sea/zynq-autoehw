@@ -80,7 +80,7 @@ $(RTL_XBUS_SMOKE): rtl/uart_stream_eval_core.v rtl/uart_stream_island_regs.v rtl
 
 $(RTL_EVAL_VECTORS): host/gen_rtl_eval_vectors.py sim/uart_stream_v1.py
 	mkdir -p $(RTL_BUILD)
-	$(PYTHON) host/gen_rtl_eval_vectors.py --frames 4 --out $@
+	$(PYTHON) host/gen_rtl_eval_vectors.py --frames 8 --out $@
 
 vivado-ooc:
 	vivado -mode batch -source scripts/vivado_ooc_uart_stream.tcl

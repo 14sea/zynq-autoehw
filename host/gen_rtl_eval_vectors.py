@@ -27,6 +27,7 @@ def main() -> int:
         STATIC_BASELINE,
         SamplerConfig(sample_phase=15, threshold=-73, majority_window=5),
         SamplerConfig(sample_phase=23, threshold=42, majority_window=3),
+        SamplerConfig(sample_phase=30, threshold=111, majority_window=5),
     ]
 
     args.out.parent.mkdir(parents=True, exist_ok=True)
@@ -62,4 +63,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

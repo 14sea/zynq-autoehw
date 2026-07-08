@@ -137,6 +137,15 @@ class UartStreamV1Test(unittest.TestCase):
             [0xA7000000, 0xA8001008, 0xA90F05B7, 0xAA013020, 0xAB011020, 0xAC000200],
         )
 
+    def test_board_smoke2_champion_oracle_counts(self):
+        config = SamplerConfig(sample_phase=30, threshold=111, majority_window=5)
+        train = score_set("train", config, frames=8)
+        holdout = score_set("holdout", config, frames=8)
+        self.assertEqual(sum(score.passed for score in train.conditions), 10)
+        self.assertEqual(sum(score.frames for score in train.conditions), 32)
+        self.assertEqual(sum(score.passed for score in holdout.conditions), 6)
+        self.assertEqual(sum(score.frames for score in holdout.conditions), 32)
+
     def test_c_twin_matches_python_oracle(self):
         if not BUILD.exists():
             self.skipTest(f"C twin not built: {BUILD}")

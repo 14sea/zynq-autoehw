@@ -85,15 +85,34 @@ module uart_stream_eval_core (
         end
     endfunction
 
-    function signed [31:0] round_div;
+    function signed [31:0] round_div_s32;
         input signed [31:0] value;
         input signed [31:0] divisor;
         begin
             if (value >= 0) begin
-                round_div = (value + (divisor / 2)) / divisor;
+                round_div_s32 = (value + (divisor / 2)) / divisor;
             end else begin
-                round_div = -((-value + (divisor / 2)) / divisor);
+                round_div_s32 = -((-value + (divisor / 2)) / divisor);
             end
+        end
+    endfunction
+
+    function [5:0] mod_u16_by_u6;
+        input [15:0] value;
+        input [5:0] divisor;
+        integer i;
+        reg [21:0] rem;
+        reg [5:0] safe_divisor;
+        begin
+            safe_divisor = (divisor == 6'd0) ? 6'd1 : divisor;
+            rem = 22'd0;
+            for (i = 15; i >= 0; i = i - 1) begin
+                rem = {rem[20:0], value[i]};
+                if (rem >= {16'd0, safe_divisor}) begin
+                    rem = rem - {16'd0, safe_divisor};
+                end
+            end
+            mod_u16_by_u6 = rem[5:0];
         end
     endfunction
 
@@ -133,9 +152,10 @@ module uart_stream_eval_core (
                         decoded_byte <= 8'd0;
                         payload_state <= lfsr_seed ^ ((frame_idx + 16'd1) * 16'h1F3D);
                         noise_state <= lfsr_seed ^ 16'hC0DE ^ (frame_idx * 16'h1021);
-                        ideal_phase <= 16 + round_div(baud_ppm, 250);
-                        threshold_bias <= round_div(threshold, 8);
-                        noise_span <= 4 + edge_score + round_div(jitter_milli * 32, 1000);
+                        ideal_phase <= 32'sd16 + round_div_s32({{16{baud_ppm[15]}}, baud_ppm}, 32'sd250);
+                        threshold_bias <= round_div_s32({{24{threshold[7]}}, threshold}, 32'sd8);
+                        noise_span <= 32'sd4 + $signed({28'd0, edge_score}) +
+                                      round_div_s32($signed({16'd0, jitter_milli}) * 32'sd32, 32'sd1000);
                         flip_threshold <= (({32'd0, flip_ppm} * 64'd65535) + 64'd500000) / 64'd1000000;
                         state <= S_PAYLOAD;
                     end
@@ -144,7 +164,7 @@ module uart_stream_eval_core (
                 S_PAYLOAD: begin
                     tmp_state1 = lfsr_next(payload_state);
                     tmp_state2 = lfsr_next(tmp_state1);
-                    tmp_payload = {8'd0 | (tmp_state1 >> 8)} ^ tmp_state2[7:0];
+                    tmp_payload = tmp_state1[15:8] ^ tmp_state2[7:0];
                     if (payload_mode == 2'd1) begin
                         tmp_payload = frame_idx[0] ? 8'hFF : 8'h00;
                     end else if (payload_mode == 2'd2) begin
@@ -168,10 +188,10 @@ module uart_stream_eval_core (
                     bit_idx <= 3'd0;
                     vote_idx <= 3'd0;
                     ones <= 3'd0;
-                    tmp_metric = 34
-                        - (abs32(sample_phase - ideal_phase) * 3)
-                        - edge_score
-                        - round_div(jitter_milli * 24, 1000);
+                    tmp_metric = 32'sd34
+                        - (abs32($signed({27'd0, sample_phase}) - ideal_phase) * 32'sd3)
+                        - $signed({28'd0, edge_score})
+                        - round_div_s32($signed({16'd0, jitter_milli}) * 32'sd24, 32'sd1000);
                     if (tmp_metric < 6) begin
                         tmp_metric = 6;
                     end
@@ -182,7 +202,7 @@ module uart_stream_eval_core (
                 S_VOTE: begin
                     tmp_state1 = lfsr_next(noise_state);
                     tmp_state2 = lfsr_next(tmp_state1);
-                    tmp_noise = (tmp_state1 % ((2 * noise_span) + 1)) - noise_span;
+                    tmp_noise = $signed({26'd0, mod_u16_by_u6(tmp_state1, ((noise_span[5:0] << 1) + 6'd1))}) - noise_span;
                     tmp_signed_signal = source_byte[bit_idx] ? signal_strength : -signal_strength;
                     tmp_metric = tmp_signed_signal + tmp_noise - threshold_bias;
                     tmp_decoded_bit = (tmp_metric >= 0) ? 1'b1 : 1'b0;
@@ -194,7 +214,7 @@ module uart_stream_eval_core (
 
                     if (vote_idx == majority_window - 3'd1) begin
                         tmp_majority_bit = (tmp_ones > (majority_window >> 1));
-                        tmp_decoded_byte = decoded_byte | (tmp_majority_bit << bit_idx);
+                        tmp_decoded_byte = decoded_byte | (tmp_majority_bit ? (8'h01 << bit_idx) : 8'h00);
                         ones <= 3'd0;
                         vote_idx <= 3'd0;
                         decoded_byte <= tmp_decoded_byte;

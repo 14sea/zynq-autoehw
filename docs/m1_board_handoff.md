@@ -66,6 +66,17 @@ than depending on `xbus_sel != 0`.
 `tb_tpu_rp_uart_stream.v` now includes a stretched-`xbus_cyc` / pulsed-`xbus_stb`
 path to mimic the soc_dfx transfer shape called out by the board failure.
 
+## Eval Arithmetic Fix After Board Smoke #2
+
+The second board run confirmed the XBUS handshake fix, then exposed a
+sim-vs-synth arithmetic mismatch inside `uart_stream_eval_core`: the island's
+own phase=30/thr=111/maj=5 champion scored train 8/32 on silicon, while the host
+oracle scores train 10/32 and holdout 6/32. The current RTL removes the ambiguous
+mixed signed/unsigned `%` path by using an explicit unsigned 16-by-6 modulo
+function, makes all round/divide operands signed and width-explicit, and fixes
+bit assembly with an explicit 8-bit shift. The RTL vector gate now covers 384
+vectors, including this board-found config over 8 frames per condition.
+
 ## Claude Steps
 
 1. Run `make all`.
