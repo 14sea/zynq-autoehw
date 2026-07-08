@@ -19,5 +19,6 @@ build/
 vivado.jou
 vivado.log
 .Xil/
+hd_visual/
 # board capture scratch
 *.raw

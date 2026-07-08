@@ -75,18 +75,40 @@ int autoehw_board_main(void) {
     autoehw_backend_t backend = {&mmio, autoehw_mmio_eval_frame};
 #endif
 
-    publish(MBOX_REACHED_MAIN);
-    publish(MBOX_PROGRESS_TAG | ((uint32_t)AUTOEHW_BOARD_BUDGET << 8) | (uint32_t)AUTOEHW_BOARD_FRAMES);
+    uint32_t ev[6];
+    ev[0] = MBOX_REACHED_MAIN;
+    ev[1] = MBOX_PROGRESS_TAG | ((uint32_t)AUTOEHW_BOARD_BUDGET << 8) | (uint32_t)AUTOEHW_BOARD_FRAMES;
+    publish(ev[0]);
+    publish(ev[1]);
     autoehw_search_result_t result = autoehw_firmware_run_train_only(
         &backend,
         AUTOEHW_BOARD_BUDGET,
         AUTOEHW_BOARD_SEED,
         AUTOEHW_BOARD_FRAMES
     );
-    publish(pack_config(result.best_config));
-    publish(pack_score(MBOX_FINAL_TRAIN_TAG, result.best_train_passed, result.train_total));
-    publish(pack_score(MBOX_FINAL_HOLDOUT_TAG, result.holdout_passed, result.holdout_total));
-    publish(MBOX_DONE_TAG | ((uint32_t)result.evals & 0x00FFFFFFu));
+    ev[2] = pack_config(result.best_config);
+    ev[3] = pack_score(MBOX_FINAL_TRAIN_TAG, result.best_train_passed, result.train_total);
+    ev[4] = pack_score(MBOX_FINAL_HOLDOUT_TAG, result.holdout_passed, result.holdout_total);
+    ev[5] = MBOX_DONE_TAG | ((uint32_t)result.evals & 0x00FFFFFFu);
+    publish(ev[2]);
+    publish(ev[3]);
+    publish(ev[4]);
+    publish(ev[5]);
+
+#ifndef AUTOEHW_HOST_STUB
+    /* Board-only observability (does not touch the search/compute or the
+     * host-stub path; host gates unaffected). soc_dfx mbox_reg latches the last
+     * written value, so a one-shot sequence leaves only ev[5] visible to a
+     * U-Boot `md` poll. Re-emit all six evidence words forever with a long dwell
+     * (~1 s/word) so the host can sample every word across polls. This is the
+     * zynq-ehw EHW-3.2 republish lesson. */
+    for (;;) {
+        for (int i = 0; i < 6; i++) {
+            MBOX = ev[i];
+            for (volatile uint32_t d = 0; d < 8000000u; d++) { }
+        }
+    }
+#endif
     return 0;
 }
 
