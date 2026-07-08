@@ -76,6 +76,44 @@ plausible payload, not that exact host-stub speed. The random baseline tying
 the champion at 17/32 is evidence that this is still a scaffold toward full M1,
 not a completed "beats random" claim.
 
+## Paged Mailbox Extension
+
+The 15-word legacy prefix above stays unchanged. Further structured evidence must
+use typed pages rather than consuming more one-off `B*` tags. The current summary
+page is appended after the legacy prefix:
+
+| Word shape | Meaning |
+|---|---|
+| `0xC0pp00nn` | page header: page id `pp`, `nn` data words |
+| `0xC1xxxxxx` | 24-bit page data word |
+| `0xC2xxxxxx` | 24-bit checksum over page id, count, and data payloads |
+
+Host-stub default page:
+
+```text
+C0010006 C101000F C1006400 C1011020 C1000001 C1010101 C1010101 C2A505CF
+```
+
+Seeded-restore host-stub page:
+
+```text
+C0010006 C101000F C1006400 C1011020 C1010101 C1010101 C1010101 C2A404CF
+```
+
+On board, the second page data word mirrors the measured `AE` payload, so it and
+the `C2` checksum will change with real evals/sec. Verify the page framing, data
+count, fixed fields, and checksum recomputed from the observed payloads.
+
+Checker:
+
+```sh
+python3 host/check_m1_mailbox.py < observed_words.txt
+```
+
+The checker accepts both default restore status (`B2000001/B3000000`) and seeded
+restore status (`B2010101/B30F05B7`), treats `AE` as measured/nonzero, and
+recomputes the summary-page checksum.
+
 ## M1 Persistence Restore Scaffold
 
 The static shell includes `axil_framebuf`: PS writes at AXI `0x40000000`, and

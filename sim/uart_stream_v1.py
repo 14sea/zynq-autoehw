@@ -20,6 +20,8 @@ DEFAULT_FRAMES = 32
 CHAMPION_STORE_MAGIC = 0x43484D50
 CHAMPION_STORE_VERSION = 0x00010000
 CHAMPION_STORE_SALT = 0x9E3779B9
+SUMMARY_PAGE_ID = 1
+LEGACY_MAILBOX_WORD_COUNT = 15
 
 
 @dataclass(frozen=True)
@@ -292,6 +294,31 @@ def champion_store_words(config: SamplerConfig, write_counter: int = 1, write_bu
     )
 
 
+def mailbox_page_checksum(page_id: int, payloads: tuple[int, ...]) -> int:
+    acc = (0xA50000 ^ ((page_id & 0xFF) << 8) ^ (len(payloads) & 0xFF)) & 0xFFFFFF
+    for idx, payload in enumerate(payloads):
+        acc ^= (payload & 0xFFFFFF) ^ (((idx + 1) * 0x1021) & 0xFFFFFF)
+    return acc & 0xFFFFFF
+
+
+def summary_mailbox_page(
+    evals_per_sec_payload: int = 0x006400,
+    restore_status_payload: int = 0x000001,
+) -> tuple[str, ...]:
+    payloads = (
+        (0x01 << 16) | LEGACY_MAILBOX_WORD_COUNT,
+        evals_per_sec_payload & 0xFFFFFF,
+        0x011020,
+        restore_status_payload & 0xFFFFFF,
+        0x010101,
+        0x010101,
+    )
+    words = [0xC0000000 | ((SUMMARY_PAGE_ID & 0xFF) << 16) | len(payloads)]
+    words.extend(0xC1000000 | payload for payload in payloads)
+    words.append(0xC2000000 | mailbox_page_checksum(SUMMARY_PAGE_ID, payloads))
+    return tuple(f"0x{word:08X}" for word in words)
+
+
 def condition_set_hash() -> str:
     return sha256(
         json.dumps([condition.__dict__ for condition in CONDITIONS], sort_keys=True).encode()
@@ -429,6 +456,7 @@ def build_replay_bundle_fixture(
             "0xB3000000",
             "0xB4010101",
             "0xB5010101",
+            *summary_mailbox_page(),
         ],
         "artifacts": {
             "benchmark_manifest_hash": benchmark_manifest_hash(),

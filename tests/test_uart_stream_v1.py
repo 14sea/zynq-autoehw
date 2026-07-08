@@ -18,6 +18,7 @@ from sim.uart_stream_v1 import (
     round_nearest_away_from_zero,
     score_as_rows,
     score_set,
+    summary_mailbox_page,
 )
 
 
@@ -85,6 +86,7 @@ class UartStreamV1Test(unittest.TestCase):
             "0xAC000200",
         ])
         self.assertEqual(replay["expected_mailbox_words"][8], "0xAF011020")
+        self.assertEqual(replay["expected_mailbox_words"][-8:], list(summary_mailbox_page()))
         self.assertIn("sha256", replay["artifacts"]["run_log_ref"])
         self.assertIn("sha256", replay["artifacts"]["write_budget_ref"])
 
@@ -170,7 +172,26 @@ class UartStreamV1Test(unittest.TestCase):
         self.assertEqual(words[12], 0xB3000000)
         self.assertEqual(words[13], 0xB4010101)
         self.assertEqual(words[14], 0xB5010101)
-        self.assertEqual(len(words), 15)
+        self.assertEqual(words[15:], [
+            0xC0010006,
+            0xC101000F,
+            0xC1006400,
+            0xC1011020,
+            0xC1000001,
+            0xC1010101,
+            0xC1010101,
+            0xC2A505CF,
+        ])
+        self.assertEqual(len(words), 23)
+        check = subprocess.run(
+            ["python3", "host/check_m1_mailbox.py"],
+            cwd=ROOT,
+            input=proc.stdout,
+            check=True,
+            text=True,
+            capture_output=True,
+        )
+        self.assertEqual(check.stdout.strip(), "PASS")
 
     def test_board_mailbox_host_stub_restores_seeded_champion(self):
         if not BOARD.exists():
@@ -200,7 +221,26 @@ class UartStreamV1Test(unittest.TestCase):
         self.assertEqual(words[12], 0xB30F05B7)
         self.assertEqual(words[13], 0xB4010101)
         self.assertEqual(words[14], 0xB5010101)
-        self.assertEqual(len(words), 15)
+        self.assertEqual(words[15:], [
+            0xC0010006,
+            0xC101000F,
+            0xC1006400,
+            0xC1011020,
+            0xC1010101,
+            0xC1010101,
+            0xC1010101,
+            0xC2A404CF,
+        ])
+        self.assertEqual(len(words), 23)
+        check = subprocess.run(
+            ["python3", "host/check_m1_mailbox.py"],
+            cwd=ROOT,
+            input=proc.stdout,
+            check=True,
+            text=True,
+            capture_output=True,
+        )
+        self.assertEqual(check.stdout.strip(), "PASS")
 
     def test_champion_store_words_match_uboot_seed_script(self):
         words = champion_store_words(SamplerConfig(sample_phase=15, threshold=-73, majority_window=5))
