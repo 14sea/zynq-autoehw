@@ -384,3 +384,43 @@ formerly byte-identical consecutive pair (`C1010101 C1010101`) is now
 `C1010101 C1410101` — **no adjacent identical words**, so a plain
 distinct-value poll of the latched mailbox captures the complete carousel with
 no dwell-time analysis needed. Telemetry ABI is now robust for future pages.
+
+---
+
+## M1-full derived long-run budget page (2026-07-08) — **PASS ✅**
+
+Bitstream rebuilt with ChatGPT's budget-page scaffold (commit `354022e`; RTL
+untouched). verify-image OK, `dfx_top.bit` md5 `61d20b9c…`. FCLK0=50 preflight
+PASS, `fpga loadb` from the existing U-Boot prompt.
+
+### Observed — full 31-word carousel, plain poll, checker PASS
+
+Legacy 15 + page 1 unchanged in structure (this image `0xAE00788E` =
+**30 862 evals/sec**). New page 2 (id=2, 6 payloads + checksum):
+
+```
+C0020006                       header: page_id=2, count=6
+C1020078                       version=2, target=120 min
+C1400020                       32 train frame-evals per candidate
+C1BE99C0 C1C00034              target_evals  low/high 22-bit chunks
+C129F4CE C1400001              cand_budget   low/high 22-bit chunks
+C2B01F82                       checksum (recomputed: OK)
+```
+
+**Derivation verified exactly against the board's own measurement** (decoded by
+hand, independently of the checker):
+
+- `target_evals` = (0x34 << 22) | 0x3E99C0 = **222 206 400** = 30 862 × 7200 ✅
+- `candidate_budget` = (1 << 22) | 0x29F4CE = **6 943 950** = 222 206 400 / 32 ✅
+
+`host/check_m1_mailbox.py` → **PASS** (recomputes page 2 from the observed AE).
+Sequence counters held (plain distinct-value poll captured all 31 words).
+
+### Meaning
+
+The board now derives its 2-hour long-run window from its **own measured
+throughput** — the M1 PASS requirement "run window derived from measured
+evals/sec × a budget, not an arbitrary wall-clock" has its on-silicon
+arithmetic verified. The actual multi-hour run itself remains the open item,
+along with NV champion store, board-side replay bundle emission, and
+beats-random headroom.
