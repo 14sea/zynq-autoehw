@@ -22,6 +22,7 @@ ROOT = Path(__file__).resolve().parents[1]
 BUILD = ROOT / "build" / "host" / "uart_stream_cli"
 RUNTIME = ROOT / "build" / "host" / "autoehw_runtime_cli"
 FIRMWARE = ROOT / "build" / "host" / "autoehw_firmware_cli"
+BOARD = ROOT / "build" / "host" / "autoehw_board_host_cli"
 
 
 class UartStreamV1Test(unittest.TestCase):
@@ -119,6 +120,22 @@ class UartStreamV1Test(unittest.TestCase):
         self.assertEqual(tuple(map(int, fields[9:11])), (sum(s.passed for s in holdout.conditions), 4 * frames))
         self.assertEqual(fields[11], "evals")
         self.assertEqual(int(fields[12]), budget * 4 * frames)
+
+    def test_board_mailbox_host_stub_matches_oracle(self):
+        if not BOARD.exists():
+            self.skipTest(f"board host CLI not built: {BOARD}")
+        proc = subprocess.run(
+            [str(BOARD)],
+            cwd=ROOT,
+            check=True,
+            text=True,
+            capture_output=True,
+        )
+        words = [int(line, 16) for line in proc.stdout.strip().splitlines()]
+        self.assertEqual(
+            words,
+            [0xA7000000, 0xA8001008, 0xA90F05B7, 0xAA013020, 0xAB011020, 0xAC000200],
+        )
 
     def test_c_twin_matches_python_oracle(self):
         if not BUILD.exists():

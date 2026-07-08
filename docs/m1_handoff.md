@@ -23,6 +23,8 @@ wrapper and no board result are claimed here.
   synthesizable single-frame evaluator and RTL-vs-oracle vector gate.
 - `rtl/uart_stream_island_regs.v` + `rtl/tb_uart_stream_island_regs.v` — simple
   memory-mapped register wrapper around the evaluator core.
+- `rtl/dfx/tpu_rp_rm_uart_stream.v` + `rtl/tb_tpu_rp_uart_stream.v` — XBUS
+  reconfigurable-module wrapper compatible with the zynq-ehw NEORV32 DFX shell.
 - `host/gen_rtl_eval_vectors.py` — generates Python-oracle vectors for the RTL
   evaluator gate.
 - `tests/test_uart_stream_v1.py` — Python standard-library tests; no pytest
@@ -30,7 +32,9 @@ wrapper and no board result are claimed here.
 - `host/run_m1_smoke.py` — emits a deterministic host `run_log` fixture under
   `build/host/`.
 - `scripts/vivado_ooc_uart_stream*.tcl` — Claude-side OOC synth/resource entries
-  for `uart_stream_eval_core` and `uart_stream_island_regs`.
+  for `uart_stream_eval_core`, `uart_stream_island_regs`, and the XBUS `tpu_rp`
+  wrapper.
+- `docs/m1_board_handoff.md` — board-side integration notes and mailbox golden.
 
 ## Gate command
 
@@ -42,7 +46,8 @@ This builds the C twin, checks Python/C condition scores bit-exactly, enforces
 the holdout firewall in the generated `run_log` fixture, checks the firmware fake
 backend against the Python oracle, runs the iverilog LFSR smoke test, checks
 `uart_stream_eval_core` against 144 Python-oracle vectors, and exercises the
-island register wrapper on a known passing vector.
+island register wrapper plus the XBUS `tpu_rp` RM wrapper on a known passing
+vector.
 
 Claude-side OOC entry:
 
