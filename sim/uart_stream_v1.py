@@ -314,7 +314,7 @@ def summary_mailbox_page(
         0x010101,
     )
     words = [0xC0000000 | ((SUMMARY_PAGE_ID & 0xFF) << 16) | len(payloads)]
-    words.extend(0xC1000000 | payload for payload in payloads)
+    words.extend(0xC1000000 | ((idx & 0x03) << 22) | (payload & 0x3FFFFF) for idx, payload in enumerate(payloads))
     words.append(0xC2000000 | mailbox_page_checksum(SUMMARY_PAGE_ID, payloads))
     return tuple(f"0x{word:08X}" for word in words)
 

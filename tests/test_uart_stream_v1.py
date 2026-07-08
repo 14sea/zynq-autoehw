@@ -175,11 +175,11 @@ class UartStreamV1Test(unittest.TestCase):
         self.assertEqual(words[15:], [
             0xC0010006,
             0xC101000F,
-            0xC1006400,
-            0xC1011020,
-            0xC1000001,
+            0xC1406400,
+            0xC1811020,
+            0xC1C00001,
             0xC1010101,
-            0xC1010101,
+            0xC1410101,
             0xC2A505CF,
         ])
         self.assertEqual(len(words), 23)
@@ -224,11 +224,11 @@ class UartStreamV1Test(unittest.TestCase):
         self.assertEqual(words[15:], [
             0xC0010006,
             0xC101000F,
-            0xC1006400,
-            0xC1011020,
+            0xC1406400,
+            0xC1811020,
+            0xC1C10101,
             0xC1010101,
-            0xC1010101,
-            0xC1010101,
+            0xC1410101,
             0xC2A404CF,
         ])
         self.assertEqual(len(words), 23)

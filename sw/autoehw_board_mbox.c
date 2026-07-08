@@ -159,7 +159,7 @@ static int append_summary_page(uint32_t *ev, int idx, int max_words) {
 
     ev[idx++] = MBOX_PAGE_HEADER_TAG | ((AUTOEHW_PAGE_ID_SUMMARY & 0xFFu) << 16) | (uint32_t)payload_count;
     for (int i = 0; i < payload_count; i++) {
-        ev[idx++] = MBOX_PAGE_DATA_TAG | (payloads[i] & 0x00FFFFFFu);
+        ev[idx++] = MBOX_PAGE_DATA_TAG | (((uint32_t)i & 0x03u) << 22) | (payloads[i] & 0x003FFFFFu);
     }
     ev[idx++] = MBOX_PAGE_END_TAG | page_checksum(AUTOEHW_PAGE_ID_SUMMARY, payloads, payload_count);
     return idx;

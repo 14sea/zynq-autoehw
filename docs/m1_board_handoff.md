@@ -85,24 +85,26 @@ page is appended after the legacy prefix:
 | Word shape | Meaning |
 |---|---|
 | `0xC0pp00nn` | page header: page id `pp`, `nn` data words |
-| `0xC1xxxxxx` | 24-bit page data word |
-| `0xC2xxxxxx` | 24-bit checksum over page id, count, and data payloads |
+| `0xC1ssxxxx` | page data word: 2-bit sequence counter `ss`, 22-bit payload |
+| `0xC2xxxxxx` | 24-bit checksum over page id, count, and decoded data payloads |
 
 Host-stub default page:
 
 ```text
-C0010006 C101000F C1006400 C1011020 C1000001 C1010101 C1010101 C2A505CF
+C0010006 C101000F C1406400 C1811020 C1C00001 C1010101 C1410101 C2A505CF
 ```
 
 Seeded-restore host-stub page:
 
 ```text
-C0010006 C101000F C1006400 C1011020 C1010101 C1010101 C1010101 C2A404CF
+C0010006 C101000F C1406400 C1811020 C1C10101 C1010101 C1410101 C2A404CF
 ```
 
 On board, the second page data word mirrors the measured `AE` payload, so it and
 the `C2` checksum will change with real evals/sec. Verify the page framing, data
-count, fixed fields, and checksum recomputed from the observed payloads.
+count, sequence counters, fixed fields, and checksum recomputed from the decoded
+payloads. The sequence counter prevents adjacent equal payloads (for example
+reject/recovery `0x010101`) from collapsing in a latched-register poll.
 
 Checker:
 

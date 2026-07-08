@@ -54,7 +54,10 @@ def main() -> int:
         return fail("summary page header mismatch")
     if any((word & 0xFF000000) != 0xC1000000 for word in page[1:7]):
         return fail("summary page data tag mismatch")
-    payloads = tuple(word & 0x00FFFFFF for word in page[1:7])
+    seqs = tuple((word >> 22) & 0x03 for word in page[1:7])
+    if seqs != (0, 1, 2, 3, 0, 1):
+        return fail("summary page sequence counters mismatch")
+    payloads = tuple(word & 0x003FFFFF for word in page[1:7])
     if payloads[0] != 0x01000F:
         return fail("summary page version/legacy-count mismatch")
     if payloads[1] != (words[7] & 0x00FFFFFF):
