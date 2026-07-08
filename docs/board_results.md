@@ -245,3 +245,41 @@ This is the **M1-full scaffold**, not full M1 PASS:
 Still pending for full M1 (tech_report §3): multi-hour run with derived budget,
 persistence across reset/reload, board-side replay bundle, beats-random on
 holdout, bad-candidate rejection + recovery.
+
+---
+
+## M1-full persistence-restore scaffold — framebuf champion restore (2026-07-08) — **PASS ✅ (scaffold scope)**
+
+Bitstream rebuilt with ChatGPT's framebuf restore scaffold (commit `92ac6b4`; RTL
+untouched — OOC/fit stands). Firmware verify-image OK. `dfx_top.bit` md5
+`b088a2d0…`. FCLK0=50 preflight PASS (persisted `0x00200a00`), `fpga loadb` OK
+from the existing U-Boot prompt.
+
+### Two-phase board sequence, both first roll
+
+**Phase 1 — default (no external store):** all 13 words matched, tail
+`0xB2000001 0xB3000000` (no store found, no restore). Measured evals/sec this
+image: `0xAE007CEE` = **31 982** (consistent with the previous 31 871).
+
+**Phase 2 — seeded restore across a logic reset:**
+1. Seeded the champion-store record from the PS via U-Boot into the static
+   `axil_framebuf` (`mw.l 0x40000000…` ×5: magic `CHMP`, meta, config
+   `0x000F05B7`, budget 1000, checksum; `md` readback verified).
+2. Pulsed `FPGA_RST_CTRL` (SLCR unlock → `0xF8000240`=0xF → 0x0) — the proven
+   zynq-ehw EHW-5.4b logic-restart that reboots NEORV32 **without a bitstream
+   reload** and preserves BRAM contents.
+3. NEORV32 rebooted, re-ran the search, validated magic+checksum on the store at
+   `0xF5000000`, and restored the champion: all 13 words matched with tail
+   **`0xB2010101 0xB30F05B7`** (restore-success status + restored champion
+   phase=15/maj=5/thr=−73). No extras, steady carousel.
+
+### Scope (explicit)
+
+This proves the **restore ABI across a logic reset**: a champion record written
+by the PS into the static-shell framebuf survives `FPGA_RST_CTRL` and is
+validated (magic + checksum + config-validity) and restored by firmware on
+reboot. It is **not** non-volatile persistence — the record lives in static-shell
+RAM and would not survive a full reconfiguration or power cycle. NV champion
+storage (QSPI/SD/NAND) with a real write budget remains open for full M1, along
+with: multi-hour run with derived budget, board-side replay bundle emission,
+beats-random headroom, and bad-candidate rejection + recovery.
