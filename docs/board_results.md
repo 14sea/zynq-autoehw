@@ -202,3 +202,46 @@ Lineage of the three fixes it took: smoke #1 (XBUS DONE handshake never asserted
 (deterministic modulo blew the pblock) → smoke #3 (compact modulo + enlarged
 pblock → full golden). No hardware damage; no power-cycle required across all
 attempts.
+
+---
+
+## M1-full scaffold smoke — telemetry + replay words (2026-07-08) — **PASS ✅ (scaffold scope)**
+
+Bitstream rebuilt with ChatGPT's M1-full scaffold firmware (commit `7d7c911`; RTL
+untouched, so the smoke-#3 OOC/fit results stand). Firmware text=3560 B,
+verify-image OK. New `dfx_top.bit` md5 `8fa3184d…`. Board was still at the U-Boot
+prompt (no reset needed), FCLK0=50 preflight PASS (`0x00200a00` persisted),
+`fpga loadb` OK.
+
+### Observed vs expected — ALL 11 WORDS, first roll
+
+| # | Observed (steady) | Expected | Verdict |
+|---|---|---|---|
+| 1–6 | `A7000000 A8001008 A90F05B7 AA013020 AB011020 AC000200` | foundation golden, unchanged | ✅ exact |
+| 7 | `0xAD00C0DE` | seed=0xC0DE | ✅ exact |
+| 8 | `0xAE007C7F` | tag 0xAE + plausible nonzero (board-measured, not host fake) | ✅ **31 871 evals/sec measured on the real fabric path** |
+| 9 | `0xAF011020` | random equal-budget holdout 17/32 | ✅ exact |
+| 10 | `0xB00013E8` | write_counter=1 / budget=1000 | ✅ exact |
+| 11 | `0xB10F05B7` | persisted champion stub = phase15/maj5/thr-73 | ✅ exact |
+
+Steady republish (11-word carousel, ~4.5 s/word), 2+ full cycles, no extras.
+
+### Scope (explicit, per the consolidation decision)
+
+This is the **M1-full scaffold**, not full M1 PASS:
+
+- `AE` gives the first **real measured evals/sec = 31 871** (512 evals ≈ 16 ms on
+  the fabric evaluator incl. MMIO overhead) — the number the M1 long-run window
+  must be derived from.
+- The random equal-budget baseline **ties** the champion on holdout (17/32 vs
+  17/32) — so **no beats-random claim**; the benchmark/search needs headroom
+  before Claim A/C can be tested (expected: this scaffold run uses the tiny
+  budget-16 smoke configuration).
+- Champion persistence is an in-RAM stub with a write-budget counter; it does not
+  yet survive reset/reload.
+- Host-side `run_log` / `write_budget` / `replay_bundle` JSON fixtures exist and
+  are schema-versioned; the board does not emit them itself yet.
+
+Still pending for full M1 (tech_report §3): multi-hour run with derived budget,
+persistence across reset/reload, board-side replay bundle, beats-random on
+holdout, bad-candidate rejection + recovery.
