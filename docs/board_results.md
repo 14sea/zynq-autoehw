@@ -312,3 +312,48 @@ is undamaged afterwards. It is **not** the full M1 recovery claim (raw-bitstream
 bad candidate + ICAP/golden reload without power-cycle). Full-M1 remainder:
 NV champion store + real write budget, multi-hour run with derived budget,
 board-side replay bundle emission, beats-random headroom.
+
+---
+
+## M1-full paged mailbox extension (2026-07-08) — **PASS ✅ (scaffold scope)**
+
+Bitstream rebuilt with ChatGPT's paged-mailbox scaffold (commit `388d7c7`; RTL
+untouched — OOC/fit stands). verify-image OK, `dfx_top.bit` md5 `4e259022…`.
+FCLK0=50 preflight PASS, `fpga loadb` from the existing U-Boot prompt.
+
+### Observed — full 23-word carousel, checker PASS
+
+Legacy 15-word prefix identical to the previous round (this image's
+`0xAE007B48` = **31 560 evals/sec**, in the stable 30–32k band). Typed summary
+page follows:
+
+```
+C0010006                          page header: page_id=1, count=6
+C101000F C1007B48 C1011020        data: champion, evals/sec, holdout
+C1000001 C1010101 C1010101        data: restore-status, reject, recovery
+C2A51A87                          checksum (recomputed over board payloads: OK)
+```
+
+`python3 host/check_m1_mailbox.py < observed_words.txt` → **PASS** (handles the
+board-varying AE payload and recomputes the page checksum — the C2 word differs
+from the host fixture exactly because the board's measured evals/sec differs).
+
+### Measurement-method note (for future paged extensions)
+
+The soc_dfx mailbox is a latched register, so **two consecutive identical words
+are invisible as a transition** — the summary page legitimately publishes
+`C1010101` twice (reject + recovery payloads are equal), and a distinct-value
+poller collapses them to one. Resolution: dwell-time analysis — every word dwells
+~4.8 s, while `C1010101` dwelt 8.5 s / 9.8 s across two independent cycles
+(≈2× single dwell), proving the duplicate publish. The full 23-word sequence
+reconstructed with that duplicate passes the checker. Recommendation for the
+next page revision: fold a 1–2-bit sequence counter into each C1 word (payload
+is 24 bits; top bits are free) so consecutive words are never byte-identical and
+a plain latched-register poll suffices.
+
+### Scope
+
+Paged, checksummed telemetry ABI board-verified (legacy prefix + typed page).
+This closes the mailbox tag-space concern. Full-M1 remainder unchanged: NV
+champion store + real write budget, multi-hour run with derived budget,
+board-side replay bundle emission, beats-random headroom.
