@@ -10,6 +10,7 @@ from sim.uart_stream_v1 import (
     build_replay_bundle_fixture,
     build_run_log_fixture,
     build_write_budget_fixture,
+    champion_store_words,
     condition_set_hash,
     lfsr16_step,
     random_baseline_best,
@@ -165,7 +166,55 @@ class UartStreamV1Test(unittest.TestCase):
         self.assertEqual(words[8], 0xAF011020)
         self.assertEqual(words[9], 0xB00013E8)
         self.assertEqual(words[10], 0xB10F05B7)
-        self.assertEqual(len(words), 11)
+        self.assertEqual(words[11], 0xB2000001)
+        self.assertEqual(words[12], 0xB3000000)
+        self.assertEqual(len(words), 13)
+
+    def test_board_mailbox_host_stub_restores_seeded_champion(self):
+        if not BOARD.exists():
+            self.skipTest(f"board host CLI not built: {BOARD}")
+        proc = subprocess.run(
+            [str(BOARD), "--seed-persisted"],
+            cwd=ROOT,
+            check=True,
+            text=True,
+            capture_output=True,
+        )
+        words = [int(line, 16) for line in proc.stdout.strip().splitlines()]
+        self.assertEqual(words[:11], [
+            0xA7000000,
+            0xA8001008,
+            0xA90F05B7,
+            0xAA013020,
+            0xAB011020,
+            0xAC000200,
+            0xAD00C0DE,
+            0xAE006400,
+            0xAF011020,
+            0xB00013E8,
+            0xB10F05B7,
+        ])
+        self.assertEqual(words[11], 0xB2010101)
+        self.assertEqual(words[12], 0xB30F05B7)
+        self.assertEqual(len(words), 13)
+
+    def test_champion_store_words_match_uboot_seed_script(self):
+        words = champion_store_words(SamplerConfig(sample_phase=15, threshold=-73, majority_window=5))
+        self.assertEqual(words, (0x43484D50, 0x00010001, 0x000F05B7, 0x000003E8, 0xDD7132B7))
+        proc = subprocess.run(
+            ["python3", "host/m1_persist_framebuf_words.py"],
+            cwd=ROOT,
+            check=True,
+            text=True,
+            capture_output=True,
+        )
+        self.assertEqual(proc.stdout.strip().splitlines(), [
+            "mw.l 0x40000000 0x43484d50",
+            "mw.l 0x40000004 0x00010001",
+            "mw.l 0x40000008 0x000f05b7",
+            "mw.l 0x4000000c 0x000003e8",
+            "mw.l 0x40000010 0xdd7132b7",
+        ])
 
     def test_board_smoke2_champion_oracle_counts(self):
         config = SamplerConfig(sample_phase=30, threshold=111, majority_window=5)

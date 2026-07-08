@@ -26,7 +26,7 @@ make all
 
 Expected summary:
 
-- 11 Python unittest cases pass.
+- 13 Python unittest cases pass.
 - C twin, train-only runtime, firmware fake backend, and board mailbox host stub
   match the Python oracle.
 - `uart_stream_eval_core` passes 384 Python-oracle RTL vectors.
@@ -65,12 +65,47 @@ The M1-full design drop extends the mailbox after the six foundation words:
 | `0xAF011020` | equal-budget random baseline on holdout: 17/32 |
 | `0xB00013E8` | champion-store write counter 1, per-run budget 1000 |
 | `0xB10F05B7` | persisted champion stub payload matches phase=15/maj=5/thr=-73 |
+| `0xB2000001` | no external restore record; local stub write counter 1 |
+| `0xB3000000` | no restored config |
 
 The host stub uses a deterministic fake cycle counter and therefore emits
 `0xAE006400`. On board, Claude should check the `0xAE` tag and a non-zero
 plausible payload, not that exact host-stub speed. The random baseline tying
 the champion at 17/32 is evidence that this is still a scaffold toward full M1,
 not a completed "beats random" claim.
+
+## M1 Persistence Restore Scaffold
+
+The static shell includes `axil_framebuf`: PS writes at AXI `0x40000000`, and
+NEORV32 reads the same words at XBUS `0xF5000000`. This drop uses the first five
+framebuf words as a champion-store record:
+
+```sh
+python3 host/m1_persist_framebuf_words.py
+```
+
+Expected U-Boot seed commands:
+
+```text
+mw.l 0x40000000 0x43484d50
+mw.l 0x40000004 0x00010001
+mw.l 0x40000008 0x000f05b7
+mw.l 0x4000000c 0x000003e8
+mw.l 0x40000010 0xdd7132b7
+```
+
+After seeding, restart the NEORV32 firmware without a full bitstream reload that
+would clear the framebuf RAM. A logic reset or RM/static-shell reset path is the
+intended test. The expected final two mailbox words become:
+
+| Word | Meaning |
+|---|---|
+| `0xB2010101` | external restore record valid, matches search champion, write counter 1 |
+| `0xB30F05B7` | restored config payload phase=15/maj=5/thr=-73 |
+
+This is still not NV persistence: the store is static-shell RAM staged by PS, not
+QSPI/SD/NAND, and it is expected to be lost on full FPGA reconfiguration. It is
+only the reset/RM-reload restore ABI and write-budget accounting smoke.
 
 ## XBUS Fix After Board Smoke #1
 

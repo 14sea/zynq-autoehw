@@ -17,6 +17,9 @@ from typing import Iterable
 SCHEMA_VERSION = "1.0.0"
 BENCHMARK_ID = "uart_stream_v1"
 DEFAULT_FRAMES = 32
+CHAMPION_STORE_MAGIC = 0x43484D50
+CHAMPION_STORE_VERSION = 0x00010000
+CHAMPION_STORE_SALT = 0x9E3779B9
 
 
 @dataclass(frozen=True)
@@ -267,6 +270,28 @@ def config_hash(config: SamplerConfig) -> str:
     return sha256(payload).hexdigest()
 
 
+def pack_config_payload(config: SamplerConfig) -> int:
+    return ((config.sample_phase & 0x1F) << 16) | ((config.majority_window & 0x7) << 8) | (config.threshold & 0xFF)
+
+
+def champion_store_checksum(magic: int, meta: int, config: int, budget: int) -> int:
+    return (magic ^ meta ^ config ^ budget ^ CHAMPION_STORE_SALT) & 0xFFFFFFFF
+
+
+def champion_store_words(config: SamplerConfig, write_counter: int = 1, write_budget: int = 1000) -> tuple[int, ...]:
+    magic = CHAMPION_STORE_MAGIC
+    meta = CHAMPION_STORE_VERSION | (write_counter & 0x0FFF)
+    config_word = pack_config_payload(config)
+    budget_word = write_budget & 0x0FFF
+    return (
+        magic,
+        meta,
+        config_word,
+        budget_word,
+        champion_store_checksum(magic, meta, config_word, budget_word),
+    )
+
+
 def condition_set_hash() -> str:
     return sha256(
         json.dumps([condition.__dict__ for condition in CONDITIONS], sort_keys=True).encode()
@@ -400,6 +425,8 @@ def build_replay_bundle_fixture(
             "0xAF011020",
             "0xB00013E8",
             "0xB10F05B7",
+            "0xB2000001",
+            "0xB3000000",
         ],
         "artifacts": {
             "benchmark_manifest_hash": benchmark_manifest_hash(),
