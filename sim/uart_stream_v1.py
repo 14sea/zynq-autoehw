@@ -286,6 +286,10 @@ def benchmark_manifest_hash() -> str:
     return sha256(json.dumps(benchmark_manifest(), sort_keys=True).encode()).hexdigest()
 
 
+def _sha256_json(payload: dict[str, object]) -> str:
+    return sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
+
+
 def build_run_log_fixture(search: SearchResult, frames: int = DEFAULT_FRAMES) -> dict[str, object]:
     train = score_set("train", search.best_config, frames)
     holdout = score_set("holdout", search.best_config, frames)
@@ -351,6 +355,71 @@ def build_run_log_fixture(search: SearchResult, frames: int = DEFAULT_FRAMES) ->
             "random_equal_budget_holdout": round(random_holdout, 6),
             "static_baseline_holdout": round(static_holdout.fitness, 6),
             "noise_band": 0.0,
+        },
+    }
+
+
+def build_write_budget_fixture(write_counter: int = 1) -> dict[str, object]:
+    return {
+        "schema": "write_budget",
+        "schema_version": SCHEMA_VERSION,
+        "budget_id": "write_budget_uart_sampler_v1",
+        "store": "champion_store_uart_sampler_v1_stub",
+        "per_run_budget": 1000,
+        "counters": {
+            "champion_writes": write_counter,
+            "checkpoint_writes": 0,
+            "final_report_writes": 0,
+        },
+        "policy": {
+            "write_only_on": ["new_champion", "periodic_checkpoint", "final_report", "operator_request"],
+            "hot_loop_writes_nv": False,
+        },
+    }
+
+
+def build_replay_bundle_fixture(
+    run_log: dict[str, object],
+    write_budget: dict[str, object],
+) -> dict[str, object]:
+    champion_hash = str(run_log["final_evaluation"]["champion_phenotype_hash"])  # type: ignore[index]
+    return {
+        "schema": "replay_bundle",
+        "schema_version": SCHEMA_VERSION,
+        "bundle_id": "replay_host_m1_fixture_champion",
+        "benchmark_id": BENCHMARK_ID,
+        "expected_mailbox_words": [
+            "0xA7000000",
+            "0xA8001008",
+            "0xA90F05B7",
+            "0xAA013020",
+            "0xAB011020",
+            "0xAC000200",
+            "0xAD00C0DE",
+            "0xAE006400",
+            "0xAF011020",
+            "0xB00013E8",
+            "0xB10F05B7",
+        ],
+        "artifacts": {
+            "benchmark_manifest_hash": benchmark_manifest_hash(),
+            "condition_set_hash": condition_set_hash(),
+            "write_budget_ref": {
+                "id": "write_budget_uart_sampler_v1",
+                "schema_version": SCHEMA_VERSION,
+                "sha256": _sha256_json(write_budget),
+            },
+            "run_log_ref": {
+                "id": run_log["header"]["run_id"],  # type: ignore[index]
+                "schema_version": SCHEMA_VERSION,
+                "sha256": _sha256_json(run_log),
+            },
+            "load_run_script": "host/run_m1_smoke.py",
+        },
+        "determinism": {
+            "champion_genome_hash": champion_hash,
+            "champion_phenotype_hash": champion_hash,
+            "bit_match_required": True,
         },
     }
 

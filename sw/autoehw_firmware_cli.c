@@ -24,9 +24,16 @@ int main(int argc, char **argv) {
     int frames = parse_int(argv[3], "frames");
     autoehw_backend_t backend = {0, autoehw_fake_eval_frame};
     autoehw_search_result_t result = autoehw_firmware_run_train_only(&backend, budget, (uint16_t)seed, frames);
+    autoehw_score_result_t random_holdout = autoehw_firmware_random_baseline_best(
+        &backend,
+        "holdout",
+        budget,
+        0xBEEFu,
+        frames
+    );
 
     printf(
-        "firmware best %d %d %d train %d %d holdout %d %d evals %d\n",
+        "firmware best %d %d %d train %d %d holdout %d %d evals %d random_holdout %d %d\n",
         result.best_config.sample_phase,
         result.best_config.threshold,
         result.best_config.majority_window,
@@ -34,8 +41,9 @@ int main(int argc, char **argv) {
         result.train_total,
         result.holdout_passed,
         result.holdout_total,
-        result.evals
+        result.evals,
+        random_holdout.passed,
+        random_holdout.total
     );
     return 0;
 }
-

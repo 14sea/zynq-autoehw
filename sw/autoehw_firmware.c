@@ -69,6 +69,38 @@ autoehw_search_result_t autoehw_firmware_run_train_only(
     return result;
 }
 
+autoehw_score_result_t autoehw_firmware_random_baseline_best(
+    const autoehw_backend_t *backend,
+    const char *split,
+    int budget,
+    uint16_t seed,
+    int frames
+) {
+    uint16_t state = seed;
+    int best_passed = 0;
+    int best_total = 0;
+    autoehw_score_result_t result = {0, 0, 0};
+
+    if (backend == 0 || backend->eval_frame == 0 || split == 0 || budget <= 0 || frames <= 0) {
+        return result;
+    }
+
+    for (int gen = 0; gen < budget; gen++) {
+        uart_sampler_config_t config = autoehw_random_config(&state);
+        int total = 0;
+        int passed = score_split_with_backend(backend, split, config, frames, &total);
+        result.evals += total;
+        if (passed * best_total > best_passed * total || best_total == 0) {
+            best_passed = passed;
+            best_total = total;
+        }
+    }
+
+    result.passed = best_passed;
+    result.total = best_total;
+    return result;
+}
+
 int autoehw_fake_eval_frame(
     void *ctx,
     const uart_condition_t *condition,
@@ -78,4 +110,3 @@ int autoehw_fake_eval_frame(
     (void)ctx;
     return uart_frame_passes(condition, config, frame_idx);
 }
-

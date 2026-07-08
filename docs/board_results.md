@@ -182,7 +182,7 @@ had auto-booted during the long builds), FCLK0=50 preflight PASS
 Steady republish, 2+ full cycles, **all six words match the host golden, no
 extras.** RESULT: **ALL 6 GOLDEN MATCHED**.
 
-### What M1 now establishes on silicon
+### What M1-foundation now establishes on silicon
 
 The uart_stream autonomous train-only loop runs end-to-end on the EBAZ4205 and
 its result is **bit-exact to the host oracle**: NEORV32 (no PC in the
@@ -191,6 +191,11 @@ runs 512 evals, selects the golden champion (phase=15), and reports train 19/32 
 holdout 17/32 — matching `sim/uart_stream_v1.py` exactly. Control plane, fabric
 evaluator, XBUS handshake, mailbox, FCLK0=50 signoff, and the reused NEORV32 DFX
 shell are all confirmed on hardware.
+
+This is a **foundation/smoke PASS**, not the full M1 Claim A/C PASS. Still pending
+for full M1: measured evals/sec-derived long-run budget, equal-budget random
+baseline evidence, replay bundle, champion persistence with write-budget
+accounting, bad-candidate rejection/recovery, and the eventual multi-hour run.
 
 Lineage of the three fixes it took: smoke #1 (XBUS DONE handshake never asserted)
 → smoke #2 (handshake fixed; eval arithmetic sim-vs-synth mismatch) → OOC fit-fail

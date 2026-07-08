@@ -7,7 +7,9 @@ from sim.uart_stream_v1 import (
     STATIC_BASELINE,
     SamplerConfig,
     benchmark_manifest_hash,
+    build_replay_bundle_fixture,
     build_run_log_fixture,
+    build_write_budget_fixture,
     condition_set_hash,
     lfsr16_step,
     random_baseline_best,
@@ -61,6 +63,29 @@ class UartStreamV1Test(unittest.TestCase):
         first = random_baseline_best("holdout", budget=8, seed=0xBEEF, frames=8)
         second = random_baseline_best("holdout", budget=8, seed=0xBEEF, frames=8)
         self.assertEqual(first, second)
+
+    def test_replay_and_write_budget_fixtures_are_schema_versioned(self):
+        search = random_search_train_only(budget=16, seed=0xC0DE, frames=8)
+        run_log = build_run_log_fixture(search, frames=8)
+        write_budget = build_write_budget_fixture(write_counter=1)
+        replay = build_replay_bundle_fixture(run_log, write_budget)
+        self.assertEqual(write_budget["schema"], "write_budget")
+        self.assertEqual(write_budget["schema_version"], "1.0.0")
+        self.assertEqual(write_budget["counters"]["champion_writes"], 1)
+        self.assertFalse(write_budget["policy"]["hot_loop_writes_nv"])
+        self.assertEqual(replay["schema"], "replay_bundle")
+        self.assertEqual(replay["schema_version"], "1.0.0")
+        self.assertEqual(replay["expected_mailbox_words"][:6], [
+            "0xA7000000",
+            "0xA8001008",
+            "0xA90F05B7",
+            "0xAA013020",
+            "0xAB011020",
+            "0xAC000200",
+        ])
+        self.assertEqual(replay["expected_mailbox_words"][8], "0xAF011020")
+        self.assertIn("sha256", replay["artifacts"]["run_log_ref"])
+        self.assertIn("sha256", replay["artifacts"]["write_budget_ref"])
 
     def test_c_runtime_matches_python_train_only_search(self):
         if not RUNTIME.exists():
@@ -120,6 +145,8 @@ class UartStreamV1Test(unittest.TestCase):
         self.assertEqual(tuple(map(int, fields[9:11])), (sum(s.passed for s in holdout.conditions), 4 * frames))
         self.assertEqual(fields[11], "evals")
         self.assertEqual(int(fields[12]), budget * 4 * frames)
+        self.assertEqual(fields[13], "random_holdout")
+        self.assertEqual(tuple(map(int, fields[14:16])), (17, 32))
 
     def test_board_mailbox_host_stub_matches_oracle(self):
         if not BOARD.exists():
@@ -132,10 +159,13 @@ class UartStreamV1Test(unittest.TestCase):
             capture_output=True,
         )
         words = [int(line, 16) for line in proc.stdout.strip().splitlines()]
-        self.assertEqual(
-            words,
-            [0xA7000000, 0xA8001008, 0xA90F05B7, 0xAA013020, 0xAB011020, 0xAC000200],
-        )
+        self.assertEqual(words[:6], [0xA7000000, 0xA8001008, 0xA90F05B7, 0xAA013020, 0xAB011020, 0xAC000200])
+        self.assertEqual(words[6], 0xAD00C0DE)
+        self.assertEqual(words[7], 0xAE006400)
+        self.assertEqual(words[8], 0xAF011020)
+        self.assertEqual(words[9], 0xB00013E8)
+        self.assertEqual(words[10], 0xB10F05B7)
+        self.assertEqual(len(words), 11)
 
     def test_board_smoke2_champion_oracle_counts(self):
         config = SamplerConfig(sample_phase=30, threshold=111, majority_window=5)
