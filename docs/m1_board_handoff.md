@@ -67,6 +67,8 @@ The M1-full design drop extends the mailbox after the six foundation words:
 | `0xB10F05B7` | persisted champion stub payload matches phase=15/maj=5/thr=-73 |
 | `0xB2000001` | no external restore record; local stub write counter 1 |
 | `0xB3000000` | no restored config |
+| `0xB4010101` | deliberately bad config rejected by the safety gate before eval |
+| `0xB5010101` | recovery probe: known-good champion still passes T0 frame 2 |
 
 The host stub uses a deterministic fake cycle counter and therefore emits
 `0xAE006400`. On board, Claude should check the `0xAE` tag and a non-zero
@@ -106,6 +108,26 @@ intended test. The expected final two mailbox words become:
 This is still not NV persistence: the store is static-shell RAM staged by PS, not
 QSPI/SD/NAND, and it is expected to be lost on full FPGA reconfiguration. It is
 only the reset/RM-reload restore ABI and write-budget accounting smoke.
+
+## M1 Bad-Candidate Rejection Scaffold
+
+The firmware injects one deliberately invalid but safe candidate
+`phase=99/thr=0/maj=4` after the main search completes. The safety gate rejects
+it before any evaluator access and emits `0xB4010101`:
+
+- bit16 = rejected;
+- bits15:8 = reason code 1 (`safety_gate`);
+- bits7:0 = rejected count 1.
+
+Then firmware evaluates the known-good champion on probe `T0 frame 2`. A passing
+probe emits `0xB5010101`:
+
+- bit16 = recovery/probe attempted;
+- bits15:8 = probe passed;
+- bits7:0 = method/probe id 1.
+
+This is a recovery scaffold for the M1 event path. It is not yet a claim that a
+bad raw-bitstream candidate was applied and recovered by ICAP/golden reload.
 
 ## XBUS Fix After Board Smoke #1
 

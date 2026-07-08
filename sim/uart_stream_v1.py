@@ -427,6 +427,8 @@ def build_replay_bundle_fixture(
             "0xB10F05B7",
             "0xB2000001",
             "0xB3000000",
+            "0xB4010101",
+            "0xB5010101",
         ],
         "artifacts": {
             "benchmark_manifest_hash": benchmark_manifest_hash(),

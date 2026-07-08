@@ -168,7 +168,9 @@ class UartStreamV1Test(unittest.TestCase):
         self.assertEqual(words[10], 0xB10F05B7)
         self.assertEqual(words[11], 0xB2000001)
         self.assertEqual(words[12], 0xB3000000)
-        self.assertEqual(len(words), 13)
+        self.assertEqual(words[13], 0xB4010101)
+        self.assertEqual(words[14], 0xB5010101)
+        self.assertEqual(len(words), 15)
 
     def test_board_mailbox_host_stub_restores_seeded_champion(self):
         if not BOARD.exists():
@@ -196,7 +198,9 @@ class UartStreamV1Test(unittest.TestCase):
         ])
         self.assertEqual(words[11], 0xB2010101)
         self.assertEqual(words[12], 0xB30F05B7)
-        self.assertEqual(len(words), 13)
+        self.assertEqual(words[13], 0xB4010101)
+        self.assertEqual(words[14], 0xB5010101)
+        self.assertEqual(len(words), 15)
 
     def test_champion_store_words_match_uboot_seed_script(self):
         words = champion_store_words(SamplerConfig(sample_phase=15, threshold=-73, majority_window=5))

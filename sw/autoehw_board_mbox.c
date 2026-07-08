@@ -28,6 +28,8 @@
 #define MBOX_PERSISTED_CFG_TAG 0xB1000000u
 #define MBOX_RESTORE_STATUS_TAG 0xB2000000u
 #define MBOX_RESTORED_CFG_TAG 0xB3000000u
+#define MBOX_REJECT_EVENT_TAG 0xB4000000u
+#define MBOX_RECOVERY_EVENT_TAG 0xB5000000u
 #define AUTOEHW_RANDOM_BASELINE_SEED 0xBEEFu
 #define AUTOEHW_FCLK_HZ 50000000u
 #define AUTOEHW_WRITE_BUDGET 1000u
@@ -141,6 +143,34 @@ static int config_is_valid(uart_sampler_config_t config) {
            (config.majority_window == 1 || config.majority_window == 3 || config.majority_window == 5);
 }
 
+static int safe_candidate_gate(uart_sampler_config_t config) {
+    return config_is_valid(config);
+}
+
+static uint32_t bad_candidate_reject_event(void) {
+    uart_sampler_config_t bad_candidate = {99, 0, 4};
+    int rejected = !safe_candidate_gate(bad_candidate);
+
+    return (rejected ? 0x00010000u : 0u) |
+           0x00000100u |
+           (rejected ? 0x00000001u : 0u);
+}
+
+static uint32_t run_bad_candidate_recovery_probe(const autoehw_backend_t *backend, uart_sampler_config_t champion) {
+    uart_sampler_config_t bad_candidate = {99, 0, 4};
+    const uart_condition_t *probe_condition = uart_condition_at(0);
+    int rejected = !safe_candidate_gate(bad_candidate);
+    int probe_pass = 0;
+
+    if (rejected && backend != 0 && backend->eval_frame != 0 && probe_condition != 0) {
+        probe_pass = backend->eval_frame(backend->ctx, probe_condition, champion, 2);
+    }
+
+    return (rejected ? 0x00010000u : 0u) |
+           0x00000100u |
+           (probe_pass ? 0x00000001u : 0u);
+}
+
 static uint32_t pack_evals_per_sec(int evals, uint64_t elapsed_cycles) {
     uint64_t value;
     if (elapsed_cycles == 0u) {
@@ -211,7 +241,7 @@ int autoehw_board_main(void) {
 
     champion_store_t champion_store = {0, {16, 0, 1}, 0, AUTOEHW_WRITE_BUDGET};
     champion_store_t restored_store = {0, {16, 0, 1}, 0, AUTOEHW_WRITE_BUDGET};
-    uint32_t ev[13];
+    uint32_t ev[15];
     uint64_t start_cycles;
     uint64_t end_cycles;
     autoehw_score_result_t random_holdout;
@@ -260,7 +290,9 @@ int autoehw_board_main(void) {
              (restored_matches_result ? 0x00000100u : 0u) |
              (champion_store.write_counter & 0xFFu);
     ev[12] = restored_valid ? pack_config(MBOX_RESTORED_CFG_TAG, restored_store.config) : MBOX_RESTORED_CFG_TAG;
-    for (int i = 2; i < 13; i++) {
+    ev[13] = MBOX_REJECT_EVENT_TAG | bad_candidate_reject_event();
+    ev[14] = MBOX_RECOVERY_EVENT_TAG | run_bad_candidate_recovery_probe(&backend, result.best_config);
+    for (int i = 2; i < 15; i++) {
         publish(ev[i]);
     }
 
@@ -272,7 +304,7 @@ int autoehw_board_main(void) {
      * (~1 s/word) so the host can sample every word across polls. This is the
      * zynq-ehw EHW-3.2 republish lesson. */
     for (;;) {
-        for (int i = 0; i < 13; i++) {
+        for (int i = 0; i < 15; i++) {
             MBOX = ev[i];
             for (volatile uint32_t d = 0; d < 8000000u; d++) { }
         }
