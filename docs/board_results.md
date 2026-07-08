@@ -357,3 +357,30 @@ Paged, checksummed telemetry ABI board-verified (legacy prefix + typed page).
 This closes the mailbox tag-space concern. Full-M1 remainder unchanged: NV
 champion store + real write budget, multi-hour run with derived budget,
 board-side replay bundle emission, beats-random headroom.
+
+---
+
+## M1-full page sequence counters (2026-07-08) — **PASS ✅**
+
+Bitstream rebuilt with ChatGPT's sequence-counter fix (commit `babfd66`; RTL
+untouched). verify-image OK, `dfx_top.bit` md5 `a74086d9…`. FCLK0=50 preflight
+PASS, `fpga loadb` from the existing U-Boot prompt.
+
+### Observed — full 23 words captured by a PLAIN latched poll, checker PASS
+
+```
+legacy 15 unchanged (AE007CEE = 31 982 evals/sec)
+C0010006                                   header
+C101000F C1407CEE C1811020 C1C00001        C1 data, seq 0,1,2,3
+C1010101 C1410101                          C1 data, seq 0,1
+C2A51D21                                   checksum (recomputed over decoded payloads: OK)
+```
+
+`host/check_m1_mailbox.py` → **PASS** (seq pattern 0,1,2,3,0,1 verified, payloads
+decoded, checksum recomputed against the board's measured AE).
+
+The previous round's measurement problem is confirmed fixed on silicon: the
+formerly byte-identical consecutive pair (`C1010101 C1010101`) is now
+`C1010101 C1410101` — **no adjacent identical words**, so a plain
+distinct-value poll of the latched mailbox captures the complete carousel with
+no dwell-time analysis needed. Telemetry ABI is now robust for future pages.
