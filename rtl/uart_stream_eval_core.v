@@ -100,19 +100,12 @@ module uart_stream_eval_core (
     function [5:0] mod_u16_by_u6;
         input [15:0] value;
         input [5:0] divisor;
-        integer i;
-        reg [21:0] rem;
         reg [5:0] safe_divisor;
+        reg [31:0] remainder;
         begin
             safe_divisor = (divisor == 6'd0) ? 6'd1 : divisor;
-            rem = 22'd0;
-            for (i = 15; i >= 0; i = i - 1) begin
-                rem = {rem[20:0], value[i]};
-                if (rem >= {16'd0, safe_divisor}) begin
-                    rem = rem - {16'd0, safe_divisor};
-                end
-            end
-            mod_u16_by_u6 = rem[5:0];
+            remainder = {16'd0, value} % {26'd0, safe_divisor};
+            mod_u16_by_u6 = remainder[5:0];
         end
     endfunction
 

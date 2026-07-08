@@ -72,10 +72,16 @@ The second board run confirmed the XBUS handshake fix, then exposed a
 sim-vs-synth arithmetic mismatch inside `uart_stream_eval_core`: the island's
 own phase=30/thr=111/maj=5 champion scored train 8/32 on silicon, while the host
 oracle scores train 10/32 and holdout 6/32. The current RTL removes the ambiguous
-mixed signed/unsigned `%` path by using an explicit unsigned 16-by-6 modulo
-function, makes all round/divide operands signed and width-explicit, and fixes
-bit assembly with an explicit 8-bit shift. The RTL vector gate now covers 384
-vectors, including this board-found config over 8 frames per condition.
+mixed signed/unsigned `%` path by keeping the modulo operands explicitly unsigned
+and fixed-width (`{16'd0, value} % {26'd0, divisor6}`), makes all round/divide
+operands signed and width-explicit, and fixes bit assembly with an explicit 8-bit
+shift. The RTL vector gate now covers 384 vectors, including this board-found
+config over 8 frames per condition.
+
+The first deterministic-arithmetic attempt used a hand-written restoring-divider
+modulo helper. Claude's OOC gate caught that it pushed the RM to 4781 LUT, above
+the 4400-LUT pblock budget. This version intentionally lets Vivado infer the `%`
+hardware again, but with the signedness ambiguity removed.
 
 ## Claude Steps
 
