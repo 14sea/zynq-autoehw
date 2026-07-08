@@ -94,7 +94,7 @@ set rp_cell u_soc/wb_tpu_inst
 create_partition_def -name tpu_pd -module tpu_rp
 create_reconfig_module -name rm_uart_stream -partition_def [get_partition_defs tpu_pd] -define_from tpu_rp
 create_pr_configuration -name cfg1 -partitions [list $rp_cell:rm_uart_stream]
-add_files -fileset constrs_1 -norecurse $shell/pblock_rp.xdc
+add_files -fileset constrs_1 -norecurse $root/rtl/dfx/pblock_rp.xdc
 set_property PR_CONFIGURATION cfg1 [get_runs impl_1]
 
 launch_runs synth_1 -jobs 8

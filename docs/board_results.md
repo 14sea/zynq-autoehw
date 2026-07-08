@@ -154,3 +154,46 @@ these.
   results are non-zero and deterministic; full DFX reload from an existing U-Boot
   prompt (no reset) works.
 - Remaining gap is purely the eval_core arithmetic's sim-vs-synth fidelity.
+
+---
+
+## M1 board smoke #3 — after arithmetic-fit fix + pblock enlarge (2026-07-08) — **PASS ✅**
+
+Bitstream rebuilt with ChatGPT's compact deterministic modulo (commit `4b9bb0b`:
+Vivado-inferred `%` with explicit unsigned fixed-width operands, keeping the
+signed/width fixes) + a Claude pblock enlargement (RP extended into clock region
+X1Y1 → full right half, 2200 slices; the RM did not pack into the single-region
+1100-slice pblock — 1885 LUT fit but needed ~1170 slices). New `dfx_top.bit`
+md5 `2df5de81…`, DRC 0 err. Reset to U-Boot from a Buildroot-Linux state (board
+had auto-booted during the long builds), FCLK0=50 preflight PASS
+(`0x00200400`→`0x00200a00`), `fpga loadb` OK.
+
+### Observed vs golden — FULL MATCH
+
+| # | Observed (steady) | Golden | Verdict |
+|---|---|---|---|
+| 1 | `0xA7000000` | `0xA7000000` | ✅ reached `main` |
+| 2 | `0xA8001008` | `0xA8001008` | ✅ budget=16, frames=8 |
+| 3 | `0xA90F05B7` | `0xA90F05B7` | ✅ champion phase=15/maj=5/thr=−73 |
+| 4 | `0xAA013020` | `0xAA013020` | ✅ train **19/32** |
+| 5 | `0xAB011020` | `0xAB011020` | ✅ holdout **17/32** |
+| 6 | `0xAC000200` | `0xAC000200` | ✅ evals=512 |
+
+Steady republish, 2+ full cycles, **all six words match the host golden, no
+extras.** RESULT: **ALL 6 GOLDEN MATCHED**.
+
+### What M1 now establishes on silicon
+
+The uart_stream autonomous train-only loop runs end-to-end on the EBAZ4205 and
+its result is **bit-exact to the host oracle**: NEORV32 (no PC in the
+candidate-selection or fitness loop) drives the fabric evaluator island over XBUS,
+runs 512 evals, selects the golden champion (phase=15), and reports train 19/32 /
+holdout 17/32 — matching `sim/uart_stream_v1.py` exactly. Control plane, fabric
+evaluator, XBUS handshake, mailbox, FCLK0=50 signoff, and the reused NEORV32 DFX
+shell are all confirmed on hardware.
+
+Lineage of the three fixes it took: smoke #1 (XBUS DONE handshake never asserted)
+→ smoke #2 (handshake fixed; eval arithmetic sim-vs-synth mismatch) → OOC fit-fail
+(deterministic modulo blew the pblock) → smoke #3 (compact modulo + enlarged
+pblock → full golden). No hardware damage; no power-cycle required across all
+attempts.

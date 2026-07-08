@@ -1,0 +1,28 @@
+# Pblock for the reconfigurable partition (the TPU), Phase 3 DFX.
+# Defined by SITE RANGES (not the whole clock region) so the bounding box stays
+# over the logic columns and excludes the central clock spine (which is illegal
+# in a reconfigurable partition). Covers all logic of region X1Y0: 1100 SLICE +
+# 20 DSP48 + BRAM — RM1's TPU (16 DSP, 1 BRAM, ~700 LUT) fits with room to spare.
+create_pblock pblock_rp
+add_cells_to_pblock [get_pblocks pblock_rp] [get_cells u_soc/wb_tpu_inst]
+resize_pblock [get_pblocks pblock_rp] -add {SLICE_X22Y0:SLICE_X43Y49}
+# zynq-autoehw M1: the uart_stream RM (~1170 slices needed, control-set-heavy) does
+# not pack into the single-region 1100-slice pblock. Extend UP into clock region
+# X1Y1 (rows 50-99, same cols) -> full right half = 2200 slices, boundary-clean.
+# Static (NEORV32+PS ~3k LUT) fits in the left half. DSP/BRAM ranges unchanged
+# (RM uses 3 DSP / 0 BRAM, both fit the existing X1Y0 ranges).
+resize_pblock [get_pblocks pblock_rp] -add {SLICE_X22Y50:SLICE_X43Y99}
+resize_pblock [get_pblocks pblock_rp] -add {DSP48_X1Y0:DSP48_X1Y19}
+resize_pblock [get_pblocks pblock_rp] -add {RAMB18_X1Y0:RAMB18_X2Y19}
+resize_pblock [get_pblocks pblock_rp] -add {RAMB36_X1Y0:RAMB36_X2Y9}
+set_property RESET_AFTER_RECONFIG true [get_pblocks pblock_rp]
+set_property SNAPPING_MODE ON [get_pblocks pblock_rp]
+# NOTE (M7.2, 2026-06-25): CONTAIN_ROUTING was tested here and REVERTED — it contains
+# the RM routing but does NOT keep static (NEORV32) routing out of the RP region, so it
+# does not isolate the RM bitstream from firmware-size-driven static routing. See
+# docs/m7_2_dcpdiff.md §routing-isolation. Routing isolation is not achievable on this
+# 7-series part with standard knobs (only logic sites are reserved, not the routing).
+
+# Phase 4 (LUT-INIT surgery): disable bitstream CRC so a host-edited LUT INIT in
+# the partial bitstream still loads (no CRC recompute needed).
+set_property BITSTREAM.GENERAL.CRC Disable [current_design]
