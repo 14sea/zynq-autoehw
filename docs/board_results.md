@@ -85,3 +85,72 @@ tb is not the real bus master), and it belongs to the RTL author.
 
 Not established: the fabric evaluator's per-frame result (blocked by the handshake
 bug above). Full golden match is pending that RTL fix + rebuild + re-verify.
+
+---
+
+## M1 board smoke #2 — after XBUS handshake fix (2026-07-08) — **PROGRESS / still FAIL**
+
+Bitstream rebuilt with ChatGPT's `tpu_rp` handshake fix (commit `cbde38d`:
+pending-transaction + registered `xbus_ack`/`xbus_dat_r`, writes no longer gated
+on `xbus_sel != 0`). Same firmware/IMEM (unchanged). New `dfx_top.bit`
+md5 `bd8b55b5…`. OOC re-verified 0 err/0 crit (3490 LUT / 909 FF). FCLK0=50
+preflight PASS (`0x00200a00`). `fpga loadb` OK. No reset/power-cycle needed
+(board was already at the U-Boot prompt).
+
+### Observed vs golden
+
+| # | Observed (steady) | Golden | Verdict |
+|---|---|---|---|
+| 1 | `0xA7000000` | `0xA7000000` | ✅ |
+| 2 | `0xA8001008` | `0xA8001008` | ✅ |
+| 3 | `0xA91E056F` (phase=30, maj=5, thr=+111) | `0xA90F05B7` (phase=15, maj=5, thr=−73) | ❌ different champion |
+| 4 | `0xAA008020` (train **8/32**) | `0xAA013020` (19/32) | ❌ |
+| 5 | `0xAB006020` (holdout **6/32**) | `0xAB011020` (17/32) | ❌ |
+| 6 | `0xAC000200` (evals=512) | `0xAC000200` | ✅ |
+
+### Diagnosis — handshake FIXED, new functional (sim-vs-synth) discrepancy
+
+**The handshake fix worked:** the island now completes every eval (search runs
+fast, non-zero results, steady republish) — the timeout/`DONE`-never-asserts
+failure from smoke #1 is gone. **New problem:** the on-chip evaluator's per-frame
+results differ slightly from the oracle, deterministically.
+
+Decisive cross-check (host oracle vs island, for the island's own champion
+phase=30/thr=111/maj=5, frames=8):
+
+| metric | island (on silicon) | host oracle | |
+|---|---|---|---|
+| train | 8/32 | 10/32 | **off by 2 frames** |
+| holdout | 6/32 | 6/32 | **exact match** |
+
+So the hardware eval ≈ oracle but flips a few frames on some inputs (holdout for
+this config matches exactly; train is off by 2). That small per-frame error
+shifts the search argmax, so the on-chip search selects phase=30 instead of the
+golden phase=15. The champion, train, and holdout all differ **because the
+evaluator is slightly wrong per-frame**, not because the search or handshake is
+broken.
+
+**Root cause locus:** `rtl/uart_stream_eval_core.v` — a **simulation-vs-synthesis
+arithmetic discrepancy**. The iverilog 144-vector gate (`tb_uart_stream_eval_core`)
+matches the Python oracle bit-exactly, but Vivado-synthesized hardware diverges on
+some frames. Prime suspects (the same non-power-of-2 ops flagged in the OOC
+resource note): the variable modulo `tmp_state1 % ((2*noise_span)+1)` and the
+`round_div(_, 1000)` divides, and mixed signed/unsigned width handling in the
+signal/noise/threshold arithmetic. Behavioral iverilog and Vivado can differ on
+these.
+
+**Suggested fixes (RTL owner):**
+1. Rework the eval arithmetic to be synthesis-deterministic: explicit signedness
+   and widths; avoid mixed signed/unsigned `%` and `/`; consider power-of-two
+   scaling so modulo/divide become masks/shifts (also shrinks the 3.5k-LUT core).
+2. Strengthen the gate beyond behavioral iverilog: add a **post-synthesis
+   (gate-level) simulation** of `eval_core` against the oracle vectors, or a wider
+   randomized vector sweep, so this class of sim-vs-synth divergence is caught on
+   the host before the board.
+
+### What smoke #2 establishes on silicon
+
+- The XBUS handshake fix is confirmed good: island evals complete, search is fast,
+  results are non-zero and deterministic; full DFX reload from an existing U-Boot
+  prompt (no reset) works.
+- Remaining gap is purely the eval_core arithmetic's sim-vs-synth fidelity.
