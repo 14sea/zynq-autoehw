@@ -25,6 +25,7 @@ all: host-gate rtl-smoke
 host-gate: c-twin runtime-cli firmware-cli board-host-cli mmio-backend
 	$(PYTHON) -m unittest discover -s tests
 	$(PYTHON) host/run_m1_smoke.py --budget 16 --frames 8 --out $(HOST_BUILD)/m1_run_log_fixture.json
+	$(PYTHON) host/run_headroom_smoke.py --budget 16 --frames 4 --out $(HOST_BUILD)/headroom_run_log_fixture.json
 
 c-twin: $(C_TWIN)
 

@@ -187,3 +187,86 @@ frozen_numeric_bands: pending_M1_measurement   # -> uart_stream_v1.1
 **M0 status:** structure + splits + fitness + thresholds committed. Numeric bands
 that depend on the real PL generator are measured and frozen in M1. This satisfies
 §M0 PASS ("the UART-like benchmark and holdout split are specified").
+
+---
+
+## 7. Headroom benchmark package `uart_stream_v2_headroom`
+
+`benchmark_id: uart_stream_v2_headroom` · `schema_version: "2.0.0"` ·
+`genome_id: uart_sampler_v2_headroom`
+
+The M1 multi-hour board run established the autonomous runtime but also falsified
+the v1 headroom assumption: at ~31k evals/sec, a two-hour run evaluates about
+7M candidates, while v1's effective sampler space is only 24,576 points. A
+longer v1 run cannot make a defensible equal-budget random baseline because the
+space is repeatedly covered.
+
+v2 is a new benchmark package and genome contract. It keeps the UART-like CRC
+task and holdout firewall, but expands the raw genome to **39 bits**:
+
+| Field | Bits | Purpose |
+|---|---:|---|
+| `sample_phase` | 5 | base sub-bit sample phase |
+| `threshold` | 8 | base slicer threshold |
+| `majority_idx` | 2 | safe majority-vote select |
+| `filter_taps` | 24 | three signed equalizer taps for condition-local phase/threshold adjustment |
+
+Raw search space: `2^39` encodings, over 600x the measured two-hour v1 candidate
+count. If v2 evaluation is slower, the existing page-2 measured-throughput budget
+derivation absorbs that automatically.
+
+### v2 split and difficulty
+
+The v2 oracle (`sim/uart_stream_v2.py`) defines new train/holdout/adversarial
+conditions with larger baud offsets, higher jitter, higher flip probability, and
+different seeds/packet lengths. The intent is to avoid v1's high-scoring plateau:
+fitness should have enough gradient for mutation/selection to matter, while
+holdout remains disjoint and final-only.
+
+### v2 A/B search contract
+
+`uart_stream_v2_headroom` requires a same-image, same-boot A/B run:
+
+| Arm | Selection rule | Holdout access |
+|---|---|---|
+| `ga` | mutation/selection on train fitness only | final evaluation only |
+| `random` | equal-budget random candidates, best train champion | final evaluation only |
+
+Mailbox pages for the board implementation must carry arm identity in their
+payloads rather than relying on separate boots. This prevents boot-to-boot
+temperature, reset, seed, or loader differences from being misread as a search
+effect.
+
+### v2 implementation constraints from the board campaign
+
+- The current RM fit point is about 4.2k LUT in an 8.8k-LUT pblock. LUT headroom
+  exists, but the previous failure mode was SLICE/control-set packing, not raw
+  LUT count.
+- Expanding the genome must not spend FF/control sets casually. The first
+  implementation clean-up before large payload/config state is to infer LUTRAM
+  for the current small payload/config memories where possible.
+- OOC/fit remains a gate before any DFX build. A v2 design that passes Python
+  and C but fails the pblock fit is a HOLD, not a board candidate.
+- v2 goldens are independent. The v1 foundation/multi-hour board evidence in
+  `docs/board_results.md` remains historical evidence and is not regenerated.
+
+### v2 host gate status
+
+Current drop is an oracle/contract scaffold:
+
+```sh
+python3 host/run_headroom_smoke.py --budget 16 --frames 4 \
+  --out build/host/headroom_run_log_fixture.json
+```
+
+The fixture pins:
+
+- `genome_contract` schema `2.0.0`;
+- `benchmark_package` schema `2.0.0`;
+- 39-bit genome encode/decode;
+- same-boot `ga` and `random` arm records;
+- holdout firewall: generation records contain train fitness only; holdout
+  appears only in `final_evaluation`.
+
+No v2 board-performance or beats-random claim exists until the C twin, firmware,
+RTL/OOC, and board evidence are added.

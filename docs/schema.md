@@ -55,6 +55,40 @@ invalid_select_policy: default_to_safe   # any out-of-range select decodes to a
 byte pattern can express contention. Inherited from the EHW-3 spare-route
 contract (every mux is a fan-in selector; invalid select → safe default).
 
+### `genome_contract` — schema_version 2.0.0 (`uart_sampler_v2_headroom`)
+
+M1's two-hour board run proved the v1 genome is too small for a meaningful
+equal-budget random-search comparison: the 24,576-point phenotype space is
+covered hundreds of times. The headroom benchmark therefore introduces a new
+incompatible genome contract. This does **not** rewrite v1 history or v1 replay
+bundles.
+
+```yaml
+schema: genome_contract
+schema_version: "2.0.0"
+genome_id: uart_sampler_v2_headroom
+byte_length: 5
+endianness: little
+raw_genome_bits: 39                 # 2^39 encodings; >> 2h measured budget
+fields:
+  - {name: sample_phase, offset_bits: 0,  width_bits: 5,  type: uint, range: [0, 31]}
+  - {name: threshold,    offset_bits: 5,  width_bits: 8,  type: int,  range: [-128, 127]}
+  - {name: majority_idx, offset_bits: 13, width_bits: 2,  type: uint,
+     decode: "0->1 vote, 1->3 vote, 2->5 vote, 3->safe 5 vote"}
+  - {name: filter_taps,  offset_bits: 15, width_bits: 24, type: packed_s8x3,
+     decode: "condition-local phase/threshold equalizer taps"}
+invalid_select_policy: default_to_safe
+search_arms:
+  ga: "train-only mutation/selection arm"
+  random: "equal-budget random arm, same boot/image"
+holdout_firewall: "holdout evaluated only after both arm champions are locked"
+```
+
+**Compatibility:** this is a MAJOR bump for `genome_contract`; consumers that
+only support `1.x` must reject it. The packed 39-bit layout is intentionally
+small enough for firmware and mailbox fingerprints but large enough that a
+2-hour run (~7M candidates at the measured v1 speed) cannot exhaust it.
+
 ---
 
 ## 2. `phenotype_manifest` — schema_version 1.0.0
@@ -333,7 +367,7 @@ hash. If reproduction needs uncommitted local state, the champion does not count
 
 | Schema | Version | Bumps when |
 |---|---|---|
-| `genome_contract` | 1.0.0 | genome field layout / decode changes |
+| `genome_contract` | 1.0.0, 2.0.0 | genome field layout / decode changes |
 | `phenotype_manifest` | 1.0.0 | allowed FAR/whitelist/pblock/LUT contract changes |
 | `local_map` | 1.0.0 | token record or edge semantics change |
 | `run_log` | 1.0.0 | required run-evidence fields change |
