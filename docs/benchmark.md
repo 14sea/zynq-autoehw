@@ -328,3 +328,40 @@ This is a deliberate fit-risk reduction step: pblock/OOC should match the
 already verified v1 evaluator because the fabric evaluator is unchanged. If the
 board v2 A/B smoke passes, a later drop may move v2 tap decode into RTL and make
 that a separate OOC/fit problem.
+
+### v2 same-boot A/B long-run telemetry
+
+The long-run A/B mode keeps the same low-risk MMIO decode path and adds live
+progress telemetry for the beats-random judgment run. Build the board image with
+`AUTOEHW_BOARD_V2_AB_LONGRUN_MODE` defined.
+
+The per-arm candidate budget is derived on board from measured throughput:
+
+```text
+arm_budget = evals_per_sec * 7200 / (2 * 4 train_conditions * 4 frames)
+```
+
+At the observed M1 rate of about 31k frame-evals/sec, this gives about 6.9M
+candidates per arm. The two arms therefore share one two-hour frame-eval budget
+rather than each consuming a separate two-hour window. Heartbeat cadence is also
+derived from measured throughput and targets about 10 seconds per page stream.
+
+Host smoke:
+
+```sh
+build/host/autoehw_board_host_cli --v2-ab-longrun-smoke \
+  | python3 host/check_v2_ab_longrun_mailbox.py
+```
+
+Additional pages:
+
+| Page id | Meaning | Payloads |
+|---|---|---|
+| 6 | GA live progress | status/arm, generation low/high, current best genome low/high, train score, evals low/high |
+| 7 | random live progress | same layout |
+
+Progress pages are position-decoded, not globally de-duplicated. This preserves
+valid repeated payloads across pages or cycles and matches the board collection
+methodology learned from the paged-mailbox smoke campaign. Holdout remains
+firewalled: page 6/7 contains train-only progress; page 4/5 final pages are the
+first v2 A/B telemetry that include holdout scores.

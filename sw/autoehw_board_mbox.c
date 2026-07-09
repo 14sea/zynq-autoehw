@@ -39,9 +39,14 @@
 #define AUTOEHW_PAGE_ID_MONITOR 3u
 #define AUTOEHW_PAGE_ID_V2_GA 4u
 #define AUTOEHW_PAGE_ID_V2_RANDOM 5u
+#define AUTOEHW_PAGE_ID_V2_GA_PROGRESS 6u
+#define AUTOEHW_PAGE_ID_V2_RANDOM_PROGRESS 7u
 #define AUTOEHW_LEGACY_WORD_COUNT 15u
 #define AUTOEHW_V2_AB_BUDGET 16
 #define AUTOEHW_V2_AB_FRAMES 4
+#define AUTOEHW_V2_AB_LONGRUN_SMOKE_BUDGET 8
+#define AUTOEHW_V2_AB_LONGRUN_SMOKE_HEARTBEAT 2
+#define AUTOEHW_V2_TRAIN_EVALS_PER_CANDIDATE (4u * AUTOEHW_V2_AB_FRAMES)
 #define AUTOEHW_LONGRUN_TARGET_SECONDS 7200u
 #define AUTOEHW_LONGRUN_HEARTBEAT_SECONDS 10u
 #define AUTOEHW_TRAIN_EVALS_PER_CANDIDATE (4u * AUTOEHW_BOARD_FRAMES)
@@ -58,7 +63,7 @@
 
 #ifdef AUTOEHW_HOST_STUB
 #include <stddef.h>
-static uint32_t mailbox_words[96];
+static uint32_t mailbox_words[160];
 static uint32_t host_framebuf_words[8];
 static size_t mailbox_count;
 static uint32_t mailbox_last;
@@ -201,6 +206,32 @@ static uint32_t longrun_heartbeat_candidates(uint32_t evals_per_sec) {
 }
 #endif
 
+#if defined(AUTOEHW_BOARD_V2_AB_LONGRUN_MODE) && !defined(AUTOEHW_HOST_STUB)
+static uint32_t v2_ab_longrun_arm_budget(uint32_t evals_per_sec) {
+    uint64_t candidate_budget = longrun_target_evals(evals_per_sec) /
+                                (uint64_t)(2u * AUTOEHW_V2_TRAIN_EVALS_PER_CANDIDATE);
+    if (candidate_budget == 0u) {
+        return 1u;
+    }
+    if (candidate_budget > (uint64_t)AUTOEHW_LONGRUN_MAX_CANDIDATES) {
+        return AUTOEHW_LONGRUN_MAX_CANDIDATES;
+    }
+    return (uint32_t)candidate_budget;
+}
+
+static uint32_t v2_ab_heartbeat_candidates(uint32_t evals_per_sec) {
+    uint64_t heartbeat = ((uint64_t)evals_per_sec * (uint64_t)AUTOEHW_LONGRUN_HEARTBEAT_SECONDS) /
+                         (uint64_t)AUTOEHW_V2_TRAIN_EVALS_PER_CANDIDATE;
+    if (heartbeat == 0u) {
+        return 1u;
+    }
+    if (heartbeat > (uint64_t)AUTOEHW_LONGRUN_MAX_CANDIDATES) {
+        return AUTOEHW_LONGRUN_MAX_CANDIDATES;
+    }
+    return (uint32_t)heartbeat;
+}
+#endif
+
 static int append_summary_page(uint32_t *ev, int idx, int max_words) {
     uint32_t payloads[6];
     int payload_count = (int)(sizeof(payloads) / sizeof(payloads[0]));
@@ -253,6 +284,34 @@ static int append_v2_arm_page(
                   ((uint32_t)result.holdout_total & 0x0FFFu);
     payloads[5] = evals & 0x003FFFFFu;
     payloads[6] = (evals >> 22) & 0x003FFFFFu;
+
+    return append_page(ev, idx, max_words, page_id, payloads, payload_count);
+}
+
+static int append_v2_progress_page(
+    uint32_t *ev,
+    int idx,
+    int max_words,
+    uint32_t page_id,
+    const autoehw_v2_progress_t *progress
+) {
+    uint32_t payloads[8];
+    uint64_t raw = uart_v2_encode_genome(progress->best_genome);
+    uint32_t generation = (uint32_t)progress->generation;
+    uint32_t evals = (uint32_t)progress->evals;
+    int payload_count = (int)(sizeof(payloads) / sizeof(payloads[0]));
+
+    payloads[0] = (0x06u << 16) |
+                  (((uint32_t)progress->arm_id & 0xFFu) << 8) |
+                  (progress->done ? 0xF1u : 0x01u);
+    payloads[1] = generation & 0x003FFFFFu;
+    payloads[2] = (generation >> 22) & 0x003FFFFFu;
+    payloads[3] = (uint32_t)(raw & 0x003FFFFFu);
+    payloads[4] = (uint32_t)((raw >> 22) & 0x003FFFFFu);
+    payloads[5] = (((uint32_t)progress->best_train_passed & 0x0FFFu) << 12) |
+                  ((uint32_t)progress->train_total & 0x0FFFu);
+    payloads[6] = evals & 0x003FFFFFu;
+    payloads[7] = (evals >> 22) & 0x003FFFFFu;
 
     return append_page(ev, idx, max_words, page_id, payloads, payload_count);
 }
@@ -327,6 +386,24 @@ static autoehw_search_result_t run_train_only_with_live_monitor(
         publish_monitor_progress,
         0
     );
+}
+#endif
+
+#if defined(AUTOEHW_HOST_STUB) || defined(AUTOEHW_BOARD_V2_AB_LONGRUN_MODE)
+static void publish_v2_progress(void *ctx, const autoehw_v2_progress_t *progress) {
+    uint32_t page_id;
+    uint32_t ev[10];
+    int idx;
+
+    (void)ctx;
+    if (progress == 0) {
+        return;
+    }
+    page_id = (progress->arm_id == 1) ? AUTOEHW_PAGE_ID_V2_GA_PROGRESS : AUTOEHW_PAGE_ID_V2_RANDOM_PROGRESS;
+    idx = append_v2_progress_page(ev, 0, (int)(sizeof(ev) / sizeof(ev[0])), page_id, progress);
+    for (int i = 0; i < idx; i++) {
+        publish(ev[i]);
+    }
 }
 #endif
 
@@ -492,6 +569,50 @@ int autoehw_host_run_v2_ab_mailbox_smoke(void) {
     }
     return 0;
 }
+
+int autoehw_host_run_v2_ab_longrun_smoke(void) {
+    autoehw_v2_backend_t backend = {0, autoehw_v2_fake_eval_frame};
+    uart_stream_v2_ab_result_t result;
+    uint32_t ev[24];
+    int ev_count = 0;
+
+    reset_host_mailbox();
+    publish(MBOX_REACHED_MAIN);
+    publish(MBOX_PROGRESS_TAG |
+            ((uint32_t)AUTOEHW_V2_AB_LONGRUN_SMOKE_BUDGET << 8) |
+            (uint32_t)AUTOEHW_V2_AB_FRAMES);
+    publish(MBOX_SEED_TAG | (uint32_t)AUTOEHW_BOARD_SEED);
+
+    result = autoehw_v2_firmware_same_boot_ab_monitored(
+        &backend,
+        AUTOEHW_V2_AB_LONGRUN_SMOKE_BUDGET,
+        AUTOEHW_BOARD_SEED,
+        AUTOEHW_V2_AB_FRAMES,
+        AUTOEHW_V2_AB_LONGRUN_SMOKE_HEARTBEAT,
+        publish_v2_progress,
+        0
+    );
+    ev_count = append_v2_arm_page(
+        ev,
+        ev_count,
+        (int)(sizeof(ev) / sizeof(ev[0])),
+        AUTOEHW_PAGE_ID_V2_GA,
+        1u,
+        result.ga
+    );
+    ev_count = append_v2_arm_page(
+        ev,
+        ev_count,
+        (int)(sizeof(ev) / sizeof(ev[0])),
+        AUTOEHW_PAGE_ID_V2_RANDOM,
+        2u,
+        result.random
+    );
+    for (int i = 0; i < ev_count; i++) {
+        publish(ev[i]);
+    }
+    return 0;
+}
 #endif
 
 int autoehw_board_main(void) {
@@ -505,7 +626,7 @@ int autoehw_board_main(void) {
 
     champion_store_t champion_store = {0, {16, 0, 1}, 0, AUTOEHW_WRITE_BUDGET};
     champion_store_t restored_store = {0, {16, 0, 1}, 0, AUTOEHW_WRITE_BUDGET};
-    uint32_t ev[64];
+    uint32_t ev[96];
     int ev_count;
     uint64_t start_cycles;
     uint64_t end_cycles;
@@ -630,6 +751,45 @@ int autoehw_board_main(void) {
             if (i >= 0) {
                 publish(ev[i]);
             }
+        }
+    }
+#endif
+
+#if defined(AUTOEHW_BOARD_V2_AB_LONGRUN_MODE) && !defined(AUTOEHW_HOST_STUB)
+    {
+        uint32_t measured_evals_per_sec = ev[7] & 0x00FFFFFFu;
+        uint32_t arm_budget = v2_ab_longrun_arm_budget(measured_evals_per_sec);
+        uint32_t heartbeat_generations = v2_ab_heartbeat_candidates(measured_evals_per_sec);
+        autoehw_v2_backend_t v2_backend = {&mmio, autoehw_v2_mmio_eval_frame};
+        uart_stream_v2_ab_result_t v2_result = autoehw_v2_firmware_same_boot_ab_monitored(
+            &v2_backend,
+            (int)arm_budget,
+            AUTOEHW_BOARD_SEED,
+            AUTOEHW_V2_AB_FRAMES,
+            (int)heartbeat_generations,
+            publish_v2_progress,
+            0
+        );
+        int start_idx = ev_count;
+
+        ev_count = append_v2_arm_page(
+            ev,
+            ev_count,
+            (int)(sizeof(ev) / sizeof(ev[0])),
+            AUTOEHW_PAGE_ID_V2_GA,
+            1u,
+            v2_result.ga
+        );
+        ev_count = append_v2_arm_page(
+            ev,
+            ev_count,
+            (int)(sizeof(ev) / sizeof(ev[0])),
+            AUTOEHW_PAGE_ID_V2_RANDOM,
+            2u,
+            v2_result.random
+        );
+        for (int i = start_idx; i < ev_count; i++) {
+            publish(ev[i]);
         }
     }
 #endif

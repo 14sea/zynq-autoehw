@@ -19,6 +19,7 @@ from sim.uart_stream_v2 import (
 ROOT = Path(__file__).resolve().parents[1]
 V2_C_TWIN = ROOT / "build" / "host" / "uart_stream_v2_cli"
 V2_FIRMWARE = ROOT / "build" / "host" / "autoehw_firmware_v2_cli"
+BOARD = ROOT / "build" / "host" / "autoehw_board_host_cli"
 
 
 class UartStreamV2HeadroomTest(unittest.TestCase):
@@ -171,11 +172,10 @@ class UartStreamV2HeadroomTest(unittest.TestCase):
         self.assertEqual(parsed["random"]["evals"], budget * 4 * frames)
 
     def test_board_host_v2_ab_mailbox_matches_oracle(self):
-        board = ROOT / "build" / "host" / "autoehw_board_host_cli"
-        if not board.exists():
-            self.skipTest(f"board host CLI not built: {board}")
+        if not BOARD.exists():
+            self.skipTest(f"board host CLI not built: {BOARD}")
         proc = subprocess.run(
-            [str(board), "--v2-ab-mailbox-smoke"],
+            [str(BOARD), "--v2-ab-mailbox-smoke"],
             cwd=ROOT,
             check=True,
             text=True,
@@ -186,6 +186,29 @@ class UartStreamV2HeadroomTest(unittest.TestCase):
         self.assertEqual(len(words), 21)
         check = subprocess.run(
             ["python3", "host/check_v2_ab_mailbox.py"],
+            cwd=ROOT,
+            input=proc.stdout,
+            check=True,
+            text=True,
+            capture_output=True,
+        )
+        self.assertEqual(check.stdout.strip(), "PASS")
+
+    def test_board_host_v2_ab_longrun_smoke_has_progress_pages(self):
+        if not BOARD.exists():
+            self.skipTest(f"board host CLI not built: {BOARD}")
+        proc = subprocess.run(
+            [str(BOARD), "--v2-ab-longrun-smoke"],
+            cwd=ROOT,
+            check=True,
+            text=True,
+            capture_output=True,
+        )
+        words = [int(line, 16) for line in proc.stdout.strip().splitlines()]
+        self.assertEqual(words[:3], [0xA7000000, 0xA8000804, 0xAD00C0DE])
+        self.assertEqual(len(words), 101)
+        check = subprocess.run(
+            ["python3", "host/check_v2_ab_longrun_mailbox.py"],
             cwd=ROOT,
             input=proc.stdout,
             check=True,

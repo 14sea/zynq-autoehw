@@ -45,12 +45,18 @@ static uart_stream_v2_arm_result_t random_arm(
     const autoehw_v2_backend_t *backend,
     int budget,
     uint16_t seed,
-    int frames
+    int frames,
+    int heartbeat_generations,
+    autoehw_v2_progress_fn progress_fn,
+    void *progress_ctx
 ) {
     uint16_t state = seed;
     int best_train_passed = -1;
     uart_stream_v2_arm_result_t result = empty_arm();
 
+    if (heartbeat_generations <= 0) {
+        heartbeat_generations = budget;
+    }
     for (int gen = 0; gen < budget; gen++) {
         uart_sampler_genome_v2_t genome = uart_v2_random_genome(&state);
         int candidate_total = 0;
@@ -62,6 +68,18 @@ static uart_stream_v2_arm_result_t random_arm(
             result.best_train_passed = candidate_passed;
             result.train_total = candidate_total;
         }
+        if (progress_fn != 0 && (((gen + 1) % heartbeat_generations) == 0 || (gen + 1) == budget)) {
+            autoehw_v2_progress_t progress = {
+                .arm_id = 2,
+                .generation = gen + 1,
+                .evals = result.evals,
+                .best_train_passed = result.best_train_passed,
+                .train_total = result.train_total,
+                .done = (gen + 1) == budget,
+                .best_genome = result.best_genome,
+            };
+            progress_fn(progress_ctx, &progress);
+        }
     }
     result.holdout_passed = score_split_with_backend(backend, "holdout", result.best_genome, frames, &result.holdout_total);
     return result;
@@ -71,7 +89,10 @@ static uart_stream_v2_arm_result_t ga_arm(
     const autoehw_v2_backend_t *backend,
     int budget,
     uint16_t seed,
-    int frames
+    int frames,
+    int heartbeat_generations,
+    autoehw_v2_progress_fn progress_fn,
+    void *progress_ctx
 ) {
     uint16_t state = seed;
     int best_train_passed;
@@ -80,11 +101,26 @@ static uart_stream_v2_arm_result_t ga_arm(
     if (budget <= 0) {
         return result;
     }
+    if (heartbeat_generations <= 0) {
+        heartbeat_generations = budget;
+    }
 
     result.best_genome = uart_v2_random_genome(&state);
     result.best_train_passed = score_split_with_backend(backend, "train", result.best_genome, frames, &result.train_total);
     result.evals += result.train_total;
     best_train_passed = result.best_train_passed;
+    if (progress_fn != 0 && (heartbeat_generations == 1 || budget == 1)) {
+        autoehw_v2_progress_t progress = {
+            .arm_id = 1,
+            .generation = 1,
+            .evals = result.evals,
+            .best_train_passed = result.best_train_passed,
+            .train_total = result.train_total,
+            .done = budget == 1,
+            .best_genome = result.best_genome,
+        };
+        progress_fn(progress_ctx, &progress);
+    }
 
     for (int gen = 1; gen < budget; gen++) {
         uart_sampler_genome_v2_t genome = uart_v2_mutate_genome(&state, result.best_genome);
@@ -97,6 +133,18 @@ static uart_stream_v2_arm_result_t ga_arm(
             result.best_train_passed = candidate_passed;
             result.train_total = candidate_total;
         }
+        if (progress_fn != 0 && (((gen + 1) % heartbeat_generations) == 0 || (gen + 1) == budget)) {
+            autoehw_v2_progress_t progress = {
+                .arm_id = 1,
+                .generation = gen + 1,
+                .evals = result.evals,
+                .best_train_passed = result.best_train_passed,
+                .train_total = result.train_total,
+                .done = (gen + 1) == budget,
+                .best_genome = result.best_genome,
+            };
+            progress_fn(progress_ctx, &progress);
+        }
     }
     result.holdout_passed = score_split_with_backend(backend, "holdout", result.best_genome, frames, &result.holdout_total);
     return result;
@@ -108,12 +156,48 @@ uart_stream_v2_ab_result_t autoehw_v2_firmware_same_boot_ab(
     uint16_t seed,
     int frames
 ) {
+    return autoehw_v2_firmware_same_boot_ab_monitored(
+        backend,
+        budget,
+        seed,
+        frames,
+        0,
+        0,
+        0
+    );
+}
+
+uart_stream_v2_ab_result_t autoehw_v2_firmware_same_boot_ab_monitored(
+    const autoehw_v2_backend_t *backend,
+    int budget,
+    uint16_t seed,
+    int frames,
+    int heartbeat_generations,
+    autoehw_v2_progress_fn progress_fn,
+    void *progress_ctx
+) {
     uart_stream_v2_ab_result_t result = {0};
     if (backend == 0 || backend->eval_frame == 0 || budget <= 0 || frames <= 0) {
         return result;
     }
-    result.ga = ga_arm(backend, budget, (uint16_t)(seed ^ 0x4A4Au), frames);
-    result.random = random_arm(backend, budget, (uint16_t)(seed ^ 0xBEEFu), frames);
+    result.ga = ga_arm(
+        backend,
+        budget,
+        (uint16_t)(seed ^ 0x4A4Au),
+        frames,
+        heartbeat_generations,
+        progress_fn,
+        progress_ctx
+    );
+    result.random = random_arm(
+        backend,
+        budget,
+        (uint16_t)(seed ^ 0xBEEFu),
+        frames,
+        heartbeat_generations,
+        progress_fn,
+        progress_ctx
+    );
     return result;
 }
 
