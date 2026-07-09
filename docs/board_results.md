@@ -424,3 +424,56 @@ evals/sec × a budget, not an arbitrary wall-clock" has its on-silicon
 arithmetic verified. The actual multi-hour run itself remains the open item,
 along with NV champion store, board-side replay bundle emission, and
 beats-random headroom.
+
+---
+
+## M1-full MULTI-HOUR autonomous run (2026-07-08→09) — **PASS ✅ (the run itself)**
+
+Long-run image built with `-DAUTOEHW_BOARD_LONGRUN_MODE`. verify-image OK,
+`dfx_top.bit` md5 `3f757815…`. Board auto-booted to Linux between builds →
+recovered to U-Boot via JTAG SLCR reset; FCLK0=50 preflight PASS; `fpga loadb`.
+Monitored by `scratchpad/longrun_monitor.py` (stuck-alert 90 s, CH340-tolerant,
+final-carousel autodetect).
+
+### The run
+
+The board first emitted the normal 31-word smoke, derived its own 2-hour
+candidate budget from its measured throughput (page 2), then ran a train-only
+search of that size against the fabric evaluator, publishing page-3 heartbeats
+live (~every 10 s). **PC was pure observer — no candidate selection, no fitness.**
+
+- Duration: **~116 min** (T+6950 s), 845 mailbox transitions logged.
+- Heartbeat cadence: steady 8–10 s throughout; **0 stuck alerts, 0 serial errors**.
+- Completed: **generation = 6,968,250 candidates**, **evals = 222,984,000**
+  frame-evals (= 6,968,250 × 32 exactly; monotonic; final marker `0x0300F1`
+  present). Both `check_m1_mailbox.py` and
+  `check_longrun_live_mailbox.py --require-final` → **PASS**.
+
+### Result — the long run found a better train champion, bit-exact to the oracle
+
+| | phase | thr | maj | train | holdout |
+|---|---|---|---|---|---|
+| longrun champion (final page-3 + tail) | 16 | 56 | 5 | **22/32** | 17/32 |
+| smoke champion (budget-16) | 15 | −73 | 5 | 19/32 | 17/32 |
+
+Host oracle cross-check of the longrun champion: train **22/32**, holdout
+**17/32** — bit-exact to the board's `aa016020` / `ab011020`. The 2-hour search
+genuinely improved train fitness (19→22) with far more budget.
+
+### Scope (explicit, honest)
+
+- ✅ **The multi-hour autonomous run is silicon-verified**: long-running,
+  PC-free candidate selection *and* fitness, budget derived from measured
+  throughput (not arbitrary wall-clock), live telemetry that distinguishes
+  progress from stuck (the 845-heartbeat monotonic log with 0 alerts *is* that
+  evidence), champion bit-exact to the oracle.
+- ❌ **Not beats-random on holdout.** Train improved 19→22 but holdout stayed
+  17→17 (same as the random baseline). This is expected and now quantified: the
+  config space is only 32×256×3 = **24,576 points**, and 6.97 M candidates
+  covers it ~280×, so both the search and random find the holdout optimum; train
+  optimization does not transfer to holdout. This is a clean train/holdout-gap
+  demonstration, and the **evals/sec-driven quantification is itself the key
+  input for designing a harder benchmark** where beats-random becomes testable.
+- Persistence remains the framebuf/logic-reset restore ABI (not NV); replay
+  bundles remain host-side. Those + a headroom benchmark are the remaining
+  full-M1 (Claim A/C) items.
