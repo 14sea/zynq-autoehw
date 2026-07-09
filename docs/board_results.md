@@ -477,3 +477,48 @@ genuinely improved train fitness (19→22) with far more budget.
 - Persistence remains the framebuf/logic-reset restore ABI (not NV); replay
   bundles remain host-side. Those + a headroom benchmark are the remaining
   full-M1 (Claim A/C) items.
+
+---
+
+## M1-full v2 headroom A/B on-board (MMIO decode path) (2026-07-09) — **PASS ✅ (plumbing smoke, not the verdict)**
+
+Board image built with `-DAUTOEHW_BOARD_V2_AB_MODE` (firmware sources +
+`sw/uart_stream_v2.c` + `sw/autoehw_firmware_v2.c`). **No RTL change** — the v2
+39-bit genome is decoded in firmware to a per-condition effective sampler config
+that drives the already-board-verified uart_stream MMIO island. `dfx_top.bit`
+md5 `4c35407f…`, verify-image OK. FCLK0=50 preflight PASS, `fpga loadb`.
+
+### Result
+
+- v1 31-word prefix: `check_m1_mailbox.py` **PASS**.
+- v2 A/B pages 4 (GA arm) and 5 (random arm), reconstructed positionally from the
+  carousel, are **byte-for-byte identical to the host oracle's pages**:
+
+| arm | genome (board) | genome (host) | train | holdout |
+|---|---|---|---|---|
+| GA (page 4) | `0x4e85cbc206` | `0x4e85cbc206` | 1/16 | 2/16 |
+| random (page 5) | `0x6cbfb15fd8` | `0x6cbfb15fd8` | 2/16 | 2/16 |
+
+So the whole v2 chain — 39-bit genome → firmware decode → **real fabric MMIO
+evaluator** → same-boot A/B telemetry — runs on silicon bit-exact to the model.
+The low-risk (no-RTL) path works.
+
+### Scope (explicit)
+
+This is the **v2 plumbing smoke, not the beats-random verdict.** The A/B ran at
+the trivial smoke budget (16 candidates, 4 frames); GA 1/16 vs random 2/16 is
+pure noise at that budget and carries no comparative meaning. The actual
+beats-random judgment needs the large-budget (multi-hour) same-boot A/B on the
+39-bit space, which is the next run.
+
+### Two measurement-tooling notes (board was correct in both)
+
+1. `check_v2_ab_mailbox.py` validates the host-stub's standalone 21-word
+   `--v2-ab-mailbox-smoke` format (prefix `a7000000 a8001004 …`), which the board
+   carousel does not emit — the board appends pages 4/5 after its normal 31-word
+   v1 smoke (frames=8). The correct board gate is the v1 prefix checker plus a
+   byte-match of pages 4/5 against the host golden.
+2. My one-shot collector's global first-seen dedup dropped page 5's data words
+   that are byte-identical to page 4's (both arms share holdout 2/16 → equal
+   payloads across pages). Fixed by reconstructing one positional cycle from the
+   timestamped transition trace (no dedup). Not a board or firmware issue.
