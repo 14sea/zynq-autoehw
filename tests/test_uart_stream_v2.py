@@ -170,6 +170,30 @@ class UartStreamV2HeadroomTest(unittest.TestCase):
         self.assertEqual(parsed["ga"]["evals"], budget * 4 * frames)
         self.assertEqual(parsed["random"]["evals"], budget * 4 * frames)
 
+    def test_board_host_v2_ab_mailbox_matches_oracle(self):
+        board = ROOT / "build" / "host" / "autoehw_board_host_cli"
+        if not board.exists():
+            self.skipTest(f"board host CLI not built: {board}")
+        proc = subprocess.run(
+            [str(board), "--v2-ab-mailbox-smoke"],
+            cwd=ROOT,
+            check=True,
+            text=True,
+            capture_output=True,
+        )
+        words = [int(line, 16) for line in proc.stdout.strip().splitlines()]
+        self.assertEqual(words[:3], [0xA7000000, 0xA8001004, 0xAD00C0DE])
+        self.assertEqual(len(words), 21)
+        check = subprocess.run(
+            ["python3", "host/check_v2_ab_mailbox.py"],
+            cwd=ROOT,
+            input=proc.stdout,
+            check=True,
+            text=True,
+            capture_output=True,
+        )
+        self.assertEqual(check.stdout.strip(), "PASS")
+
 
 if __name__ == "__main__":
     unittest.main()

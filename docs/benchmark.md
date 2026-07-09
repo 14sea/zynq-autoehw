@@ -276,3 +276,31 @@ The fixture and tests pin:
 
 No v2 board-performance or beats-random claim exists until mailbox A/B telemetry,
 RTL/OOC, and board evidence are added.
+
+### v2 mailbox A/B scaffold
+
+The host-gated mailbox scaffold uses the existing paged ABI:
+
+```sh
+build/host/autoehw_board_host_cli --v2-ab-mailbox-smoke \
+  | python3 host/check_v2_ab_mailbox.py
+```
+
+Prefix:
+
+| Word | Meaning |
+|---|---|
+| `A7000000` | reached main |
+| `A8001004` | v2 A/B smoke budget=16, frames=4 |
+| `AD00C0DE` | shared search seed |
+
+Pages:
+
+| Page id | Arm | Payloads |
+|---|---|---|
+| 4 | `ga` | version/arm id, raw genome low/high 22-bit chunks, train score, holdout score, evals low/high |
+| 5 | `random` | same layout |
+
+The checker recomputes both arm champions from the Python v2 oracle. The host
+path uses `autoehw_firmware_v2` through a backend callback, so a future MMIO
+fabric evaluator can replace the fake backend without changing A/B bookkeeping.

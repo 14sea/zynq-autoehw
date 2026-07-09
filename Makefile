@@ -63,9 +63,9 @@ $(V2_FIRMWARE_CLI): sw/uart_stream_v1.c sw/uart_stream_v1.h sw/uart_stream_v2.c 
 	mkdir -p $(HOST_BUILD)
 	$(CC) $(CFLAGS) -I sw sw/uart_stream_v1.c sw/uart_stream_v2.c sw/autoehw_firmware_v2.c sw/autoehw_firmware_v2_cli.c -o $@
 
-$(BOARD_HOST_CLI): sw/uart_stream_v1.c sw/uart_stream_v1.h sw/autoehw_runtime.c sw/autoehw_runtime.h sw/autoehw_firmware.c sw/autoehw_firmware.h sw/autoehw_mmio_backend.h sw/autoehw_board_mbox.c sw/autoehw_board_host_cli.c
+$(BOARD_HOST_CLI): sw/uart_stream_v1.c sw/uart_stream_v1.h sw/uart_stream_v2.c sw/uart_stream_v2.h sw/autoehw_runtime.c sw/autoehw_runtime.h sw/autoehw_firmware.c sw/autoehw_firmware.h sw/autoehw_firmware_v2.c sw/autoehw_firmware_v2.h sw/autoehw_mmio_backend.h sw/autoehw_board_mbox.c sw/autoehw_board_host_cli.c
 	mkdir -p $(HOST_BUILD)
-	$(CC) $(CFLAGS) -I sw sw/uart_stream_v1.c sw/autoehw_runtime.c sw/autoehw_firmware.c sw/autoehw_board_host_cli.c -o $@
+	$(CC) $(CFLAGS) -I sw sw/uart_stream_v1.c sw/uart_stream_v2.c sw/autoehw_runtime.c sw/autoehw_firmware.c sw/autoehw_firmware_v2.c sw/autoehw_board_host_cli.c -o $@
 
 $(MMIO_OBJ): sw/autoehw_mmio_backend.c sw/autoehw_mmio_backend.h sw/autoehw_firmware.h sw/uart_stream_regs.h
 	mkdir -p $(HOST_BUILD)

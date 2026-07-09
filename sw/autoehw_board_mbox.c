@@ -7,6 +7,7 @@
  */
 
 #include "autoehw_firmware.h"
+#include "autoehw_firmware_v2.h"
 #include "autoehw_mmio_backend.h"
 
 #include <stdint.h>
@@ -36,7 +37,11 @@
 #define AUTOEHW_PAGE_ID_SUMMARY 1u
 #define AUTOEHW_PAGE_ID_LONGRUN 2u
 #define AUTOEHW_PAGE_ID_MONITOR 3u
+#define AUTOEHW_PAGE_ID_V2_GA 4u
+#define AUTOEHW_PAGE_ID_V2_RANDOM 5u
 #define AUTOEHW_LEGACY_WORD_COUNT 15u
+#define AUTOEHW_V2_AB_BUDGET 16
+#define AUTOEHW_V2_AB_FRAMES 4
 #define AUTOEHW_LONGRUN_TARGET_SECONDS 7200u
 #define AUTOEHW_LONGRUN_HEARTBEAT_SECONDS 10u
 #define AUTOEHW_TRAIN_EVALS_PER_CANDIDATE (4u * AUTOEHW_BOARD_FRAMES)
@@ -224,6 +229,32 @@ static int append_longrun_page(uint32_t *ev, int idx, int max_words) {
     payloads[5] = (uint32_t)((candidate_budget >> 22) & 0x003FFFFFu);
 
     return append_page(ev, idx, max_words, AUTOEHW_PAGE_ID_LONGRUN, payloads, payload_count);
+}
+
+static int append_v2_arm_page(
+    uint32_t *ev,
+    int idx,
+    int max_words,
+    uint32_t page_id,
+    uint32_t arm_id,
+    uart_stream_v2_arm_result_t result
+) {
+    uint32_t payloads[7];
+    uint64_t raw = uart_v2_encode_genome(result.best_genome);
+    uint32_t evals = (uint32_t)result.evals;
+    int payload_count = (int)(sizeof(payloads) / sizeof(payloads[0]));
+
+    payloads[0] = (0x04u << 16) | (arm_id & 0xFFFFu);
+    payloads[1] = (uint32_t)(raw & 0x003FFFFFu);
+    payloads[2] = (uint32_t)((raw >> 22) & 0x003FFFFFu);
+    payloads[3] = (((uint32_t)result.best_train_passed & 0x0FFFu) << 12) |
+                  ((uint32_t)result.train_total & 0x0FFFu);
+    payloads[4] = (((uint32_t)result.holdout_passed & 0x0FFFu) << 12) |
+                  ((uint32_t)result.holdout_total & 0x0FFFu);
+    payloads[5] = evals & 0x003FFFFFu;
+    payloads[6] = (evals >> 22) & 0x003FFFFFu;
+
+    return append_page(ev, idx, max_words, page_id, payloads, payload_count);
 }
 
 #if defined(AUTOEHW_HOST_STUB) || defined(AUTOEHW_BOARD_LONGRUN_MODE)
@@ -418,6 +449,47 @@ int autoehw_host_run_longrun_monitor_smoke(void) {
     publish(pack_score(MBOX_FINAL_TRAIN_TAG, result.best_train_passed, result.train_total));
     publish(pack_score(MBOX_FINAL_HOLDOUT_TAG, result.holdout_passed, result.holdout_total));
     publish(MBOX_DONE_TAG | ((uint32_t)result.evals & 0x00FFFFFFu));
+    return 0;
+}
+
+int autoehw_host_run_v2_ab_mailbox_smoke(void) {
+    autoehw_v2_backend_t backend = {0, autoehw_v2_fake_eval_frame};
+    uart_stream_v2_ab_result_t result;
+    uint32_t ev[24];
+    int ev_count = 0;
+
+    reset_host_mailbox();
+    publish(MBOX_REACHED_MAIN);
+    publish(MBOX_PROGRESS_TAG |
+            ((uint32_t)AUTOEHW_V2_AB_BUDGET << 8) |
+            (uint32_t)AUTOEHW_V2_AB_FRAMES);
+    publish(MBOX_SEED_TAG | (uint32_t)AUTOEHW_BOARD_SEED);
+
+    result = autoehw_v2_firmware_same_boot_ab(
+        &backend,
+        AUTOEHW_V2_AB_BUDGET,
+        AUTOEHW_BOARD_SEED,
+        AUTOEHW_V2_AB_FRAMES
+    );
+    ev_count = append_v2_arm_page(
+        ev,
+        ev_count,
+        (int)(sizeof(ev) / sizeof(ev[0])),
+        AUTOEHW_PAGE_ID_V2_GA,
+        1u,
+        result.ga
+    );
+    ev_count = append_v2_arm_page(
+        ev,
+        ev_count,
+        (int)(sizeof(ev) / sizeof(ev[0])),
+        AUTOEHW_PAGE_ID_V2_RANDOM,
+        2u,
+        result.random
+    );
+    for (int i = 0; i < ev_count; i++) {
+        publish(ev[i]);
+    }
     return 0;
 }
 #endif
