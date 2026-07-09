@@ -60,3 +60,12 @@ int autoehw_mmio_eval_frame(
     }
     return 0;
 }
+
+int autoehw_v2_mmio_eval_frame(
+    void *ctx,
+    const uart_condition_t *condition,
+    uart_sampler_genome_v2_t genome,
+    int frame_idx
+) {
+    return autoehw_mmio_eval_frame(ctx, condition, uart_v2_effective_config(condition, genome), frame_idx);
+}

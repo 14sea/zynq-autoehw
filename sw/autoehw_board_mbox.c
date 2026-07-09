@@ -600,6 +600,40 @@ int autoehw_board_main(void) {
     }
 #endif
 
+#if defined(AUTOEHW_BOARD_V2_AB_MODE) && !defined(AUTOEHW_HOST_STUB)
+    {
+        autoehw_v2_backend_t v2_backend = {&mmio, autoehw_v2_mmio_eval_frame};
+        uart_stream_v2_ab_result_t v2_result = autoehw_v2_firmware_same_boot_ab(
+            &v2_backend,
+            AUTOEHW_V2_AB_BUDGET,
+            AUTOEHW_BOARD_SEED,
+            AUTOEHW_V2_AB_FRAMES
+        );
+
+        ev_count = append_v2_arm_page(
+            ev,
+            ev_count,
+            (int)(sizeof(ev) / sizeof(ev[0])),
+            AUTOEHW_PAGE_ID_V2_GA,
+            1u,
+            v2_result.ga
+        );
+        ev_count = append_v2_arm_page(
+            ev,
+            ev_count,
+            (int)(sizeof(ev) / sizeof(ev[0])),
+            AUTOEHW_PAGE_ID_V2_RANDOM,
+            2u,
+            v2_result.random
+        );
+        for (int i = ev_count - 18; i < ev_count; i++) {
+            if (i >= 0) {
+                publish(ev[i]);
+            }
+        }
+    }
+#endif
+
 #ifndef AUTOEHW_HOST_STUB
     /* Board-only observability. soc_dfx mbox_reg latches the last written value,
      * so a one-shot sequence leaves only the final value visible to a U-Boot

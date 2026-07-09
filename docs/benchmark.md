@@ -304,3 +304,27 @@ Pages:
 The checker recomputes both arm champions from the Python v2 oracle. The host
 path uses `autoehw_firmware_v2` through a backend callback, so a future MMIO
 fabric evaluator can replace the fake backend without changing A/B bookkeeping.
+
+### v2 board-facing MMIO mode
+
+The first board-facing v2 path intentionally **does not add new RTL**. Firmware
+decodes the 39-bit v2 genome and computes the per-condition effective v1 sampler
+config, then calls the existing, board-verified `uart_stream` MMIO island. Build
+the image with `AUTOEHW_BOARD_V2_AB_MODE` defined to append page 4/5 after the
+normal v1 smoke evidence.
+
+Required firmware sources for that image:
+
+```text
+sw/uart_stream_v1.c
+sw/uart_stream_v2.c
+sw/autoehw_firmware.c
+sw/autoehw_firmware_v2.c
+sw/autoehw_mmio_backend.c
+sw/autoehw_board_mbox.c
+```
+
+This is a deliberate fit-risk reduction step: pblock/OOC should match the
+already verified v1 evaluator because the fabric evaluator is unchanged. If the
+board v2 A/B smoke passes, a later drop may move v2 tap decode into RTL and make
+that a separate OOC/fit problem.
