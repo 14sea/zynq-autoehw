@@ -35,6 +35,26 @@ autoehw_search_result_t autoehw_firmware_run_train_only(
     uint16_t seed,
     int frames
 ) {
+    return autoehw_firmware_run_train_only_monitored(
+        backend,
+        budget,
+        seed,
+        frames,
+        0,
+        0,
+        0
+    );
+}
+
+autoehw_search_result_t autoehw_firmware_run_train_only_monitored(
+    const autoehw_backend_t *backend,
+    int budget,
+    uint16_t seed,
+    int frames,
+    int heartbeat_generations,
+    autoehw_progress_fn progress_fn,
+    void *progress_ctx
+) {
     uint16_t state = seed;
     int best_train_passed = -1;
     int train_total = 0;
@@ -50,6 +70,9 @@ autoehw_search_result_t autoehw_firmware_run_train_only(
     if (backend == 0 || backend->eval_frame == 0 || budget <= 0 || frames <= 0) {
         return result;
     }
+    if (heartbeat_generations <= 0) {
+        heartbeat_generations = budget;
+    }
 
     for (int gen = 0; gen < budget; gen++) {
         uart_sampler_config_t config = autoehw_random_config(&state);
@@ -61,6 +84,17 @@ autoehw_search_result_t autoehw_firmware_run_train_only(
             train_total = candidate_total;
             result.best_config = config;
             result.best_train_passed = candidate_passed;
+        }
+        if (progress_fn != 0 && (((gen + 1) % heartbeat_generations) == 0 || (gen + 1) == budget)) {
+            autoehw_progress_t progress = {
+                .generation = gen + 1,
+                .evals = result.evals,
+                .best_train_passed = result.best_train_passed,
+                .train_total = train_total,
+                .done = (gen + 1) == budget,
+                .best_config = result.best_config,
+            };
+            progress_fn(progress_ctx, &progress);
         }
     }
 

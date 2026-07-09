@@ -203,6 +203,29 @@ class UartStreamV1Test(unittest.TestCase):
         )
         self.assertEqual(check.stdout.strip(), "PASS")
 
+    def test_board_longrun_monitor_smoke_is_checkable(self):
+        if not BOARD.exists():
+            self.skipTest(f"board host CLI not built: {BOARD}")
+        proc = subprocess.run(
+            [str(BOARD), "--longrun-monitor-smoke"],
+            cwd=ROOT,
+            check=True,
+            text=True,
+            capture_output=True,
+        )
+        words = [int(line, 16) for line in proc.stdout.strip().splitlines()]
+        self.assertEqual(words[:2], [0xA7000000, 0xA8000808])
+        self.assertEqual(len(words), 42)
+        check = subprocess.run(
+            ["python3", "host/check_longrun_monitor_mailbox.py"],
+            cwd=ROOT,
+            input=proc.stdout,
+            check=True,
+            text=True,
+            capture_output=True,
+        )
+        self.assertEqual(check.stdout.strip(), "PASS")
+
     def test_board_mailbox_host_stub_restores_seeded_champion(self):
         if not BOARD.exists():
             self.skipTest(f"board host CLI not built: {BOARD}")

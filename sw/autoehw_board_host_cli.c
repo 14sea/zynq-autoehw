@@ -8,8 +8,14 @@
 int main(int argc, char **argv) {
     if (argc == 2 && strcmp(argv[1], "--seed-persisted") == 0) {
         autoehw_host_seed_persisted_champion();
+    } else if (argc == 2 && strcmp(argv[1], "--longrun-monitor-smoke") == 0) {
+        autoehw_host_run_longrun_monitor_smoke();
+        for (size_t idx = 0; idx < autoehw_host_mailbox_count(); idx++) {
+            printf("%08x\n", autoehw_host_mailbox_at(idx));
+        }
+        return 0;
     } else if (argc != 1) {
-        fprintf(stderr, "usage: %s [--seed-persisted]\n", argv[0]);
+        fprintf(stderr, "usage: %s [--seed-persisted|--longrun-monitor-smoke]\n", argv[0]);
         return 2;
     }
 

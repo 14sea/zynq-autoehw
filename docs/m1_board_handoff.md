@@ -121,6 +121,28 @@ window; it records the formula inputs/outputs for a two-hour target:
 For the host fake speed `0x6400`, this is 184,320,000 frame-evals and 5,760,000
 candidates. On board, these fields must be recomputed from the observed `AE`.
 
+Page id 3 is the long-run monitor scaffold. The default board smoke does **not**
+emit it; the host gate exercises it with:
+
+```sh
+build/host/autoehw_board_host_cli --longrun-monitor-smoke \
+  | python3 host/check_longrun_monitor_mailbox.py
+```
+
+Each monitor page has seven payloads:
+
+| Payload | Meaning |
+|---|---|
+| `0x030001` / `0x0300F1` | heartbeat / final marker |
+| `generation_lo/generation_hi` | completed candidate count split into 22-bit chunks |
+| `evals_lo/evals_hi` | completed train frame-evals split into 22-bit chunks |
+| `best_train_score` | current best train pass/total packed as `(passed << 12) | total` |
+| `best_config` | current best sampler config payload |
+
+The scaffold is intentionally monitor-only: it proves framing, sequence counters,
+checksums, and progress arithmetic for future multi-hour polling, but it is not a
+multi-hour board result by itself.
+
 Checker:
 
 ```sh

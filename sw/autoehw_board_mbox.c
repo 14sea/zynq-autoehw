@@ -35,9 +35,12 @@
 #define MBOX_PAGE_END_TAG 0xC2000000u
 #define AUTOEHW_PAGE_ID_SUMMARY 1u
 #define AUTOEHW_PAGE_ID_LONGRUN 2u
+#define AUTOEHW_PAGE_ID_MONITOR 3u
 #define AUTOEHW_LEGACY_WORD_COUNT 15u
 #define AUTOEHW_LONGRUN_TARGET_SECONDS 7200u
 #define AUTOEHW_TRAIN_EVALS_PER_CANDIDATE (4u * AUTOEHW_BOARD_FRAMES)
+#define AUTOEHW_LONGRUN_MONITOR_SMOKE_BUDGET 8
+#define AUTOEHW_LONGRUN_MONITOR_HEARTBEAT 2
 #define AUTOEHW_RANDOM_BASELINE_SEED 0xBEEFu
 #define AUTOEHW_FCLK_HZ 50000000u
 #define AUTOEHW_WRITE_BUDGET 1000u
@@ -48,7 +51,7 @@
 
 #ifdef AUTOEHW_HOST_STUB
 #include <stddef.h>
-static uint32_t mailbox_words[32];
+static uint32_t mailbox_words[96];
 static uint32_t host_framebuf_words[8];
 static size_t mailbox_count;
 static uint32_t mailbox_last;
@@ -69,6 +72,11 @@ static void publish(uint32_t word) {
     if (mailbox_count < (sizeof(mailbox_words) / sizeof(mailbox_words[0]))) {
         mailbox_words[mailbox_count++] = word;
     }
+}
+
+static void reset_host_mailbox(void) {
+    mailbox_count = 0;
+    mailbox_last = 0;
 }
 
 size_t autoehw_host_mailbox_count(void) {
@@ -189,6 +197,45 @@ static int append_longrun_page(uint32_t *ev, int idx, int max_words) {
     return append_page(ev, idx, max_words, AUTOEHW_PAGE_ID_LONGRUN, payloads, payload_count);
 }
 
+#ifdef AUTOEHW_HOST_STUB
+static int append_monitor_page(
+    uint32_t *ev,
+    int idx,
+    int max_words,
+    const autoehw_progress_t *progress
+) {
+    uint32_t payloads[7];
+    uint64_t generation = (uint64_t)(uint32_t)progress->generation;
+    uint64_t evals = (uint64_t)(uint32_t)progress->evals;
+    int payload_count = (int)(sizeof(payloads) / sizeof(payloads[0]));
+
+    payloads[0] = (0x03u << 16) | (progress->done ? 0x00F1u : 0x0001u);
+    payloads[1] = (uint32_t)(generation & 0x003FFFFFu);
+    payloads[2] = (uint32_t)((generation >> 22) & 0x003FFFFFu);
+    payloads[3] = (uint32_t)(evals & 0x003FFFFFu);
+    payloads[4] = (uint32_t)((evals >> 22) & 0x003FFFFFu);
+    payloads[5] = (((uint32_t)progress->best_train_passed & 0x0FFFu) << 12) |
+                  ((uint32_t)progress->train_total & 0x0FFFu);
+    payloads[6] = pack_config_payload(progress->best_config);
+
+    return append_page(ev, idx, max_words, AUTOEHW_PAGE_ID_MONITOR, payloads, payload_count);
+}
+
+typedef struct {
+    uint32_t *ev;
+    int idx;
+    int max_words;
+} monitor_page_ctx_t;
+
+static void append_monitor_progress(void *ctx, const autoehw_progress_t *progress) {
+    monitor_page_ctx_t *monitor = (monitor_page_ctx_t *)ctx;
+    if (monitor == 0 || progress == 0) {
+        return;
+    }
+    monitor->idx = append_monitor_page(monitor->ev, monitor->idx, monitor->max_words, progress);
+}
+#endif
+
 static uint32_t champion_store_checksum(uint32_t magic, uint32_t meta, uint32_t config, uint32_t budget) {
     return magic ^ meta ^ config ^ budget ^ AUTOEHW_CHAMPION_STORE_SALT;
 }
@@ -287,11 +334,47 @@ void autoehw_host_seed_persisted_champion(void) {
     host_framebuf_words[3] = budget_word;
     host_framebuf_words[4] = champion_store_checksum(magic, meta, config_word, budget_word);
 }
+
+int autoehw_host_run_longrun_monitor_smoke(void) {
+    autoehw_backend_t backend = {0, autoehw_fake_eval_frame};
+    uint32_t monitor_words[48];
+    monitor_page_ctx_t monitor = {
+        .ev = monitor_words,
+        .idx = 0,
+        .max_words = (int)(sizeof(monitor_words) / sizeof(monitor_words[0])),
+    };
+
+    reset_host_mailbox();
+    publish(MBOX_REACHED_MAIN);
+    publish(MBOX_PROGRESS_TAG |
+            ((uint32_t)AUTOEHW_LONGRUN_MONITOR_SMOKE_BUDGET << 8) |
+            (uint32_t)AUTOEHW_BOARD_FRAMES);
+
+    autoehw_search_result_t result = autoehw_firmware_run_train_only_monitored(
+        &backend,
+        AUTOEHW_LONGRUN_MONITOR_SMOKE_BUDGET,
+        AUTOEHW_BOARD_SEED,
+        AUTOEHW_BOARD_FRAMES,
+        AUTOEHW_LONGRUN_MONITOR_HEARTBEAT,
+        append_monitor_progress,
+        &monitor
+    );
+
+    for (int i = 0; i < monitor.idx; i++) {
+        publish(monitor_words[i]);
+    }
+    publish(pack_config(MBOX_FINAL_CFG_TAG, result.best_config));
+    publish(pack_score(MBOX_FINAL_TRAIN_TAG, result.best_train_passed, result.train_total));
+    publish(pack_score(MBOX_FINAL_HOLDOUT_TAG, result.holdout_passed, result.holdout_total));
+    publish(MBOX_DONE_TAG | ((uint32_t)result.evals & 0x00FFFFFFu));
+    return 0;
+}
 #endif
 
 int autoehw_board_main(void) {
 #ifdef AUTOEHW_HOST_STUB
     autoehw_backend_t backend = {0, autoehw_fake_eval_frame};
+    reset_host_mailbox();
 #else
     autoehw_mmio_ctx_t mmio = {(volatile uint32_t *)UART_ISLAND_BASE, 1000000u};
     autoehw_backend_t backend = {&mmio, autoehw_mmio_eval_frame};
