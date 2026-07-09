@@ -1,0 +1,45 @@
+#ifndef UART_STREAM_V2_H
+#define UART_STREAM_V2_H
+
+#include <stdint.h>
+
+#include "uart_stream_v1.h"
+
+#define UART_STREAM_V2_DEFAULT_FRAMES 8
+#define UART_STREAM_V2_GENOME_BITS 39
+
+typedef struct {
+    int sample_phase;
+    int threshold;
+    int majority_idx;
+    uint32_t tap_word;
+} uart_sampler_genome_v2_t;
+
+typedef struct {
+    uart_sampler_genome_v2_t best_genome;
+    int best_train_passed;
+    int train_total;
+    int holdout_passed;
+    int holdout_total;
+    int evals;
+} uart_stream_v2_arm_result_t;
+
+typedef struct {
+    uart_stream_v2_arm_result_t ga;
+    uart_stream_v2_arm_result_t random;
+} uart_stream_v2_ab_result_t;
+
+int uart_v2_condition_count(void);
+const uart_condition_t *uart_v2_condition_at(int idx);
+uint64_t uart_v2_encode_genome(uart_sampler_genome_v2_t genome);
+uart_sampler_genome_v2_t uart_v2_decode_genome(uint64_t word);
+uart_sampler_config_t uart_v2_effective_config(const uart_condition_t *condition, uart_sampler_genome_v2_t genome);
+uart_condition_score_t uart_v2_score_condition(const uart_condition_t *condition, uart_sampler_genome_v2_t genome, int frames);
+int uart_v2_score_split(const char *split, uart_sampler_genome_v2_t genome, int frames, int *total);
+uart_sampler_genome_v2_t uart_v2_random_genome(uint16_t *state);
+uart_sampler_genome_v2_t uart_v2_mutate_genome(uint16_t *state, uart_sampler_genome_v2_t parent);
+uart_stream_v2_arm_result_t uart_v2_ga_arm_train_only(int budget, uint16_t seed, int frames);
+uart_stream_v2_arm_result_t uart_v2_random_arm_train_only(int budget, uint16_t seed, int frames);
+uart_stream_v2_ab_result_t uart_v2_same_boot_ab_search(int budget, uint16_t seed, int frames);
+
+#endif

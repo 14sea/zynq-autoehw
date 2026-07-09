@@ -80,11 +80,11 @@ static int edge_score(const char *edge_unc) {
     return 8;
 }
 
-static int round_div(int value, int divisor) {
+static int round_div(int64_t value, int64_t divisor) {
     if (value >= 0) {
-        return (value + (divisor / 2)) / divisor;
+        return (int)((value + (divisor / 2)) / divisor);
     }
-    return -((-value + (divisor / 2)) / divisor);
+    return (int)(-((-value + (divisor / 2)) / divisor));
 }
 
 static int ideal_phase(const uart_condition_t *condition) {
@@ -132,7 +132,7 @@ static int vote_bit(int bit, const uart_condition_t *condition, uart_sampler_con
         int signed_signal = bit ? signal : -signal;
         int decoded = (signed_signal + noise - threshold_bias) >= 0 ? 1 : 0;
         uint16_t flip_rnd = rand16(state);
-        if (flip_rnd < (uint16_t)round_div(condition->flip_ppm * 65535, 1000000)) {
+        if (flip_rnd < (uint16_t)round_div((int64_t)condition->flip_ppm * 65535, 1000000)) {
             decoded ^= 1;
         }
         ones += decoded;
@@ -177,4 +177,3 @@ uart_condition_score_t uart_score_condition(const uart_condition_t *condition, u
     }
     return score;
 }
-

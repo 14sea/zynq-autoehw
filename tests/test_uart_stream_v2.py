@@ -12,10 +12,13 @@ from sim.uart_stream_v2 import (
     genome_space_size,
     same_boot_ab_search,
     build_run_log_fixture,
+    score_set,
 )
 
 
 ROOT = Path(__file__).resolve().parents[1]
+V2_C_TWIN = ROOT / "build" / "host" / "uart_stream_v2_cli"
+V2_FIRMWARE = ROOT / "build" / "host" / "autoehw_firmware_v2_cli"
 
 
 class UartStreamV2HeadroomTest(unittest.TestCase):
@@ -68,6 +71,104 @@ class UartStreamV2HeadroomTest(unittest.TestCase):
         fixture = json.loads(out.read_text())
         self.assertEqual(fixture["header"]["benchmark_id"], BENCHMARK_ID)
         self.assertEqual(fixture["header"]["schema_versions"]["genome_contract"], "2.0.0")
+
+    def test_c_twin_matches_python_score_rows(self):
+        if not V2_C_TWIN.exists():
+            self.skipTest(f"v2 C twin not built: {V2_C_TWIN}")
+        raw = 0x123456789
+        genome = decode_genome(raw)
+        frames = 4
+        proc = subprocess.run(
+            [str(V2_C_TWIN), "score", hex(raw), str(frames)],
+            cwd=ROOT,
+            check=True,
+            text=True,
+            capture_output=True,
+        )
+        observed = []
+        for line in proc.stdout.strip().splitlines():
+            fields = line.split()
+            observed.append((fields[0], fields[1], int(fields[2]), int(fields[3])))
+        expected = []
+        for split in ("train", "holdout", "adversarial"):
+            for score in score_set(split, genome, frames).conditions:
+                expected.append((score.condition, score.split, score.passed, score.frames))
+        self.assertEqual(observed, expected)
+
+    def test_c_twin_matches_python_same_boot_ab_search(self):
+        if not V2_C_TWIN.exists():
+            self.skipTest(f"v2 C twin not built: {V2_C_TWIN}")
+        budget = 16
+        frames = 4
+        seed = 0xC0DE
+        result = same_boot_ab_search(budget, seed, frames)
+        fixture = build_run_log_fixture(result)
+        proc = subprocess.run(
+            [str(V2_C_TWIN), "ab", str(budget), hex(seed), str(frames)],
+            cwd=ROOT,
+            check=True,
+            text=True,
+            capture_output=True,
+        )
+        lines = proc.stdout.strip().splitlines()
+        self.assertEqual(len(lines), 2)
+        parsed = {}
+        for line in lines:
+            fields = line.split()
+            parsed[fields[0]] = {
+                "raw": int(fields[2], 16),
+                "train": (int(fields[12]), int(fields[13])),
+                "holdout": (int(fields[15]), int(fields[16])),
+                "evals": int(fields[18]),
+            }
+        self.assertEqual(parsed["ga"]["raw"], encode_genome(result.ga.best_genome))
+        self.assertEqual(parsed["random"]["raw"], encode_genome(result.random.best_genome))
+        self.assertEqual(
+            parsed["ga"]["train"],
+            (
+                round(fixture["final_evaluation"]["ga"]["train_fitness"] * 4 * frames),
+                4 * frames,
+            ),
+        )
+        self.assertEqual(
+            parsed["random"]["holdout"],
+            (
+                round(fixture["final_evaluation"]["random_equal_budget"]["holdout_fitness"] * 4 * frames),
+                4 * frames,
+            ),
+        )
+        self.assertEqual(parsed["ga"]["evals"], budget * 4 * frames)
+        self.assertEqual(parsed["random"]["evals"], budget * 4 * frames)
+
+    def test_firmware_fake_backend_matches_python_same_boot_ab_search(self):
+        if not V2_FIRMWARE.exists():
+            self.skipTest(f"v2 firmware CLI not built: {V2_FIRMWARE}")
+        budget = 16
+        frames = 4
+        seed = 0xC0DE
+        result = same_boot_ab_search(budget, seed, frames)
+        proc = subprocess.run(
+            [str(V2_FIRMWARE), str(budget), hex(seed), str(frames)],
+            cwd=ROOT,
+            check=True,
+            text=True,
+            capture_output=True,
+        )
+        lines = proc.stdout.strip().splitlines()
+        self.assertEqual(len(lines), 2)
+        parsed = {}
+        for line in lines:
+            fields = line.split()
+            parsed[fields[0]] = {
+                "raw": int(fields[2], 16),
+                "train": (int(fields[4]), int(fields[5])),
+                "holdout": (int(fields[7]), int(fields[8])),
+                "evals": int(fields[10]),
+            }
+        self.assertEqual(parsed["ga"]["raw"], encode_genome(result.ga.best_genome))
+        self.assertEqual(parsed["random"]["raw"], encode_genome(result.random.best_genome))
+        self.assertEqual(parsed["ga"]["evals"], budget * 4 * frames)
+        self.assertEqual(parsed["random"]["evals"], budget * 4 * frames)
 
 
 if __name__ == "__main__":

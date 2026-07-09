@@ -252,21 +252,27 @@ effect.
 
 ### v2 host gate status
 
-Current drop is an oracle/contract scaffold:
+The headroom benchmark now has an oracle, C twin, and firmware fake-backend host
+path:
 
 ```sh
 python3 host/run_headroom_smoke.py --budget 16 --frames 4 \
   --out build/host/headroom_run_log_fixture.json
+build/host/uart_stream_v2_cli ab 16 0xC0DE 4
+build/host/autoehw_firmware_v2_cli 16 0xC0DE 4
 ```
 
-The fixture pins:
+The fixture and tests pin:
 
 - `genome_contract` schema `2.0.0`;
 - `benchmark_package` schema `2.0.0`;
 - 39-bit genome encode/decode;
 - same-boot `ga` and `random` arm records;
 - holdout firewall: generation records contain train fitness only; holdout
-  appears only in `final_evaluation`.
+  appears only in `final_evaluation`;
+- C twin bit-exactness against the Python oracle for fixed genomes and A/B
+  search;
+- firmware fake-backend A/B bookkeeping against the Python oracle.
 
-No v2 board-performance or beats-random claim exists until the C twin, firmware,
+No v2 board-performance or beats-random claim exists until mailbox A/B telemetry,
 RTL/OOC, and board evidence are added.
