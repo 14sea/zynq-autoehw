@@ -41,12 +41,15 @@
 #define AUTOEHW_PAGE_ID_V2_RANDOM 5u
 #define AUTOEHW_PAGE_ID_V2_GA_PROGRESS 6u
 #define AUTOEHW_PAGE_ID_V2_RANDOM_PROGRESS 7u
+#define AUTOEHW_PAGE_ID_V2_CALIBRATION 8u
 #define AUTOEHW_LEGACY_WORD_COUNT 15u
 #define AUTOEHW_V2_AB_BUDGET 16
 #define AUTOEHW_V2_AB_FRAMES 4
 #define AUTOEHW_V2_AB_LONGRUN_SMOKE_BUDGET 8
 #define AUTOEHW_V2_AB_LONGRUN_SMOKE_HEARTBEAT 2
 #define AUTOEHW_V2_TRAIN_EVALS_PER_CANDIDATE (4u * AUTOEHW_V2_AB_FRAMES)
+#define AUTOEHW_V2_EPS_PROBE_CANDIDATES 32
+#define AUTOEHW_V2_EPS_PROBE_SEED 0x51A7u
 #define AUTOEHW_LONGRUN_TARGET_SECONDS 7200u
 #define AUTOEHW_LONGRUN_HEARTBEAT_SECONDS 10u
 #define AUTOEHW_TRAIN_EVALS_PER_CANDIDATE (4u * AUTOEHW_BOARD_FRAMES)
@@ -316,6 +319,29 @@ static int append_v2_progress_page(
     return append_page(ev, idx, max_words, page_id, payloads, payload_count);
 }
 
+static int append_v2_calibration_page(
+    uint32_t *ev,
+    int idx,
+    int max_words,
+    uint32_t v2_evals_per_sec,
+    uint32_t arm_budget,
+    uint32_t heartbeat_generations
+) {
+    uint32_t payloads[8];
+    int payload_count = (int)(sizeof(payloads) / sizeof(payloads[0]));
+
+    payloads[0] = (0x08u << 16) | (AUTOEHW_LONGRUN_TARGET_SECONDS / 60u);
+    payloads[1] = v2_evals_per_sec & 0x003FFFFFu;
+    payloads[2] = AUTOEHW_V2_TRAIN_EVALS_PER_CANDIDATE;
+    payloads[3] = arm_budget & 0x003FFFFFu;
+    payloads[4] = (arm_budget >> 22) & 0x003FFFFFu;
+    payloads[5] = heartbeat_generations & 0x003FFFFFu;
+    payloads[6] = (heartbeat_generations >> 22) & 0x003FFFFFu;
+    payloads[7] = (AUTOEHW_V2_EPS_PROBE_CANDIDATES * AUTOEHW_V2_TRAIN_EVALS_PER_CANDIDATE) & 0x003FFFFFu;
+
+    return append_page(ev, idx, max_words, AUTOEHW_PAGE_ID_V2_CALIBRATION, payloads, payload_count);
+}
+
 #if defined(AUTOEHW_HOST_STUB) || defined(AUTOEHW_BOARD_LONGRUN_MODE)
 static void monitor_payloads(const autoehw_progress_t *progress, uint32_t *payloads, int payload_count) {
     uint64_t generation = (uint64_t)(uint32_t)progress->generation;
@@ -459,6 +485,37 @@ static uint32_t pack_evals_per_sec(int evals, uint64_t elapsed_cycles) {
     return MBOX_EVALS_PER_SEC_TAG | (uint32_t)value;
 }
 
+#if defined(AUTOEHW_HOST_STUB) || defined(AUTOEHW_BOARD_V2_AB_LONGRUN_MODE)
+static uint32_t measure_v2_evals_per_sec(const autoehw_v2_backend_t *backend) {
+    uint16_t state = AUTOEHW_V2_EPS_PROBE_SEED;
+    uint32_t evals = 0;
+    uint64_t start_cycles;
+    uint64_t end_cycles;
+    uint32_t packed;
+
+    if (backend == 0 || backend->eval_frame == 0) {
+        return 1u;
+    }
+    start_cycles = read_cycle64();
+    for (int candidate = 0; candidate < AUTOEHW_V2_EPS_PROBE_CANDIDATES; candidate++) {
+        uart_sampler_genome_v2_t genome = uart_v2_random_genome(&state);
+        for (int idx = 0; idx < uart_v2_condition_count(); idx++) {
+            const uart_condition_t *condition = uart_v2_condition_at(idx);
+            if (condition == 0 || condition->split[0] != 't') {
+                continue;
+            }
+            for (int frame_idx = 0; frame_idx < AUTOEHW_V2_AB_FRAMES; frame_idx++) {
+                (void)backend->eval_frame(backend->ctx, condition, genome, frame_idx);
+                evals++;
+            }
+        }
+    }
+    end_cycles = read_cycle64();
+    packed = pack_evals_per_sec((int)evals, end_cycles - start_cycles) & 0x00FFFFFFu;
+    return packed == 0u ? 1u : packed;
+}
+#endif
+
 static void persist_champion_stub(champion_store_t *store, uart_sampler_config_t config) {
     if (store->write_counter < store->write_budget) {
         store->magic = AUTOEHW_CHAMPION_STORE_MAGIC;
@@ -575,6 +632,7 @@ int autoehw_host_run_v2_ab_longrun_smoke(void) {
     uart_stream_v2_ab_result_t result;
     uint32_t ev[24];
     int ev_count = 0;
+    uint32_t v2_evals_per_sec;
 
     reset_host_mailbox();
     publish(MBOX_REACHED_MAIN);
@@ -582,6 +640,20 @@ int autoehw_host_run_v2_ab_longrun_smoke(void) {
             ((uint32_t)AUTOEHW_V2_AB_LONGRUN_SMOKE_BUDGET << 8) |
             (uint32_t)AUTOEHW_V2_AB_FRAMES);
     publish(MBOX_SEED_TAG | (uint32_t)AUTOEHW_BOARD_SEED);
+
+    v2_evals_per_sec = measure_v2_evals_per_sec(&backend);
+    ev_count = append_v2_calibration_page(
+        ev,
+        ev_count,
+        (int)(sizeof(ev) / sizeof(ev[0])),
+        v2_evals_per_sec,
+        AUTOEHW_V2_AB_LONGRUN_SMOKE_BUDGET,
+        AUTOEHW_V2_AB_LONGRUN_SMOKE_HEARTBEAT
+    );
+    for (int i = 0; i < ev_count; i++) {
+        publish(ev[i]);
+    }
+    ev_count = 0;
 
     result = autoehw_v2_firmware_same_boot_ab_monitored(
         &backend,
@@ -757,11 +829,26 @@ int autoehw_board_main(void) {
 
 #if defined(AUTOEHW_BOARD_V2_AB_LONGRUN_MODE) && !defined(AUTOEHW_HOST_STUB)
     {
-        uint32_t measured_evals_per_sec = ev[7] & 0x00FFFFFFu;
-        uint32_t arm_budget = v2_ab_longrun_arm_budget(measured_evals_per_sec);
-        uint32_t heartbeat_generations = v2_ab_heartbeat_candidates(measured_evals_per_sec);
         autoehw_v2_backend_t v2_backend = {&mmio, autoehw_v2_mmio_eval_frame};
-        uart_stream_v2_ab_result_t v2_result = autoehw_v2_firmware_same_boot_ab_monitored(
+        uint32_t measured_v2_evals_per_sec = measure_v2_evals_per_sec(&v2_backend);
+        uint32_t arm_budget = v2_ab_longrun_arm_budget(measured_v2_evals_per_sec);
+        uint32_t heartbeat_generations = v2_ab_heartbeat_candidates(measured_v2_evals_per_sec);
+        int start_idx = ev_count;
+        uart_stream_v2_ab_result_t v2_result;
+
+        ev_count = append_v2_calibration_page(
+            ev,
+            ev_count,
+            (int)(sizeof(ev) / sizeof(ev[0])),
+            measured_v2_evals_per_sec,
+            arm_budget,
+            heartbeat_generations
+        );
+        for (int i = start_idx; i < ev_count; i++) {
+            publish(ev[i]);
+        }
+        start_idx = ev_count;
+        v2_result = autoehw_v2_firmware_same_boot_ab_monitored(
             &v2_backend,
             (int)arm_budget,
             AUTOEHW_BOARD_SEED,
@@ -770,8 +857,6 @@ int autoehw_board_main(void) {
             publish_v2_progress,
             0
         );
-        int start_idx = ev_count;
-
         ev_count = append_v2_arm_page(
             ev,
             ev_count,

@@ -341,10 +341,13 @@ The per-arm candidate budget is derived on board from measured throughput:
 arm_budget = evals_per_sec * 7200 / (2 * 4 train_conditions * 4 frames)
 ```
 
-At the observed M1 rate of about 31k frame-evals/sec, this gives about 6.9M
-candidates per arm. The two arms therefore share one two-hour frame-eval budget
-rather than each consuming a separate two-hour window. Heartbeat cadence is also
-derived from measured throughput and targets about 10 seconds per page stream.
+For v2 this `evals_per_sec` must come from a v2-path probe, not the legacy v1
+`AE` smoke word. Board smoke found the MMIO-decode v2 path can be much slower
+than the v1 evaluator, so inheriting v1 throughput would oversize the wall-clock
+run window. The two arms therefore share one two-hour frame-eval budget based on
+the measured v2 path rather than each consuming a separate two-hour window.
+Heartbeat cadence is also derived from the v2 probe and targets about 10 seconds
+per page stream.
 
 Host smoke:
 
@@ -357,6 +360,7 @@ Additional pages:
 
 | Page id | Meaning | Payloads |
 |---|---|---|
+| 8 | v2 calibration | target minutes, measured v2 evals/sec, train evals/candidate, arm budget low/high, heartbeat low/high, probe eval count |
 | 6 | GA live progress | status/arm, generation low/high, current best genome low/high, train score, evals low/high |
 | 7 | random live progress | same layout |
 

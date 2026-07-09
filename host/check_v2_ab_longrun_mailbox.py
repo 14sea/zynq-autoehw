@@ -25,6 +25,9 @@ FRAMES = 4
 SEED = 0xC0DE
 HEARTBEAT = 2
 TRAIN_TOTAL = 4 * FRAMES
+PROBE_CANDIDATES = 32
+PROBE_EVALS = PROBE_CANDIDATES * TRAIN_TOTAL
+HOST_FAKE_V2_EPS = PROBE_EVALS * 50
 
 
 def parse_words(text: str) -> list[int]:
@@ -133,15 +136,32 @@ def expected_arm_payload(arm_id: int, result) -> tuple[int, ...]:
     )
 
 
+def expected_calibration_payload() -> tuple[int, ...]:
+    return (
+        (0x08 << 16) | 120,
+        HOST_FAKE_V2_EPS,
+        TRAIN_TOTAL,
+        BUDGET,
+        0,
+        HEARTBEAT,
+        0,
+        PROBE_EVALS,
+    )
+
+
 def main() -> int:
     words = parse_words(sys.stdin.read())
-    expected_len = 3 + 4 * 10 + 4 * 10 + 2 * 9
+    expected_len = 3 + 10 + 4 * 10 + 4 * 10 + 2 * 9
     if len(words) != expected_len:
         return fail(f"need exactly {expected_len} words, got {len(words)}")
     if words[:3] != [0xA7000000, 0xA8000804, 0xAD00C0DE]:
         return fail("v2 A/B long-run smoke prefix mismatch")
 
     offset = 3
+    calibration_payloads = decode_page(words, offset, 8, 8)
+    if calibration_payloads != expected_calibration_payload():
+        return fail("v2 calibration page mismatch")
+    offset += 10
     for payload in expected_progress_payloads(1):
         observed = decode_page(words, offset, 6, 8)
         if observed != payload:
