@@ -143,6 +143,42 @@ The scaffold is intentionally monitor-only: it proves framing, sequence counters
 checksums, and progress arithmetic for future multi-hour polling, but it is not a
 multi-hour board result by itself.
 
+## Multi-Hour Board Image
+
+Build the long-run image with `AUTOEHW_BOARD_LONGRUN_MODE` defined. The default
+image remains the short 31-word smoke carousel.
+
+Long-run mode first emits the normal 31-word smoke evidence, including page 2.
+It then derives the candidate budget from the measured `AE` speed using the page
+2 formula, runs the same train-only search against the fabric backend, and
+publishes page 3 live from the firmware progress callback. The heartbeat cadence
+is derived from the measured speed as roughly 10 seconds of train frame-evals:
+
+```text
+heartbeat_candidates = measured_evals_per_sec * 10 / 32
+candidate_budget     = measured_evals_per_sec * 7200 / 32
+```
+
+At the previously observed board speed band (~31k evals/sec), this means roughly
+9.6k candidates per heartbeat and ~6.9M candidates for a two-hour run. The final
+page 3 carries full 44-bit generation/eval counters; the legacy `AC` done word is
+only a compatibility tail and exposes the low 24 bits.
+
+After completion, the board republish carousel keeps the original 31-word smoke
+evidence and appends the final page 3 plus final result tail, so a post-run poll
+can still recover the terminal state if the live collector reconnects late.
+
+For a captured long-run mailbox log:
+
+```sh
+python3 host/check_longrun_live_mailbox.py --require-final < observed_words.txt
+```
+
+During a run in progress, omit `--require-final`; the checker still validates
+page framing, sequence counters, checksum, valid config payloads, and monotonic
+`generation/evals` progress. This is the intended stuck-vs-slow-progress gate for
+the multi-hour board session.
+
 Checker:
 
 ```sh

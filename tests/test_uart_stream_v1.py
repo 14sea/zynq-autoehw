@@ -225,6 +225,15 @@ class UartStreamV1Test(unittest.TestCase):
             capture_output=True,
         )
         self.assertEqual(check.stdout.strip(), "PASS")
+        live_check = subprocess.run(
+            ["python3", "host/check_longrun_live_mailbox.py", "--require-final"],
+            cwd=ROOT,
+            input=proc.stdout,
+            check=True,
+            text=True,
+            capture_output=True,
+        )
+        self.assertEqual(live_check.stdout.strip(), "PASS pages=4 generation=8 evals=256")
 
     def test_board_mailbox_host_stub_restores_seeded_champion(self):
         if not BOARD.exists():

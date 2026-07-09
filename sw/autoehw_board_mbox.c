@@ -38,7 +38,9 @@
 #define AUTOEHW_PAGE_ID_MONITOR 3u
 #define AUTOEHW_LEGACY_WORD_COUNT 15u
 #define AUTOEHW_LONGRUN_TARGET_SECONDS 7200u
+#define AUTOEHW_LONGRUN_HEARTBEAT_SECONDS 10u
 #define AUTOEHW_TRAIN_EVALS_PER_CANDIDATE (4u * AUTOEHW_BOARD_FRAMES)
+#define AUTOEHW_LONGRUN_MAX_CANDIDATES 67108863u
 #define AUTOEHW_LONGRUN_MONITOR_SMOKE_BUDGET 8
 #define AUTOEHW_LONGRUN_MONITOR_HEARTBEAT 2
 #define AUTOEHW_RANDOM_BASELINE_SEED 0xBEEFu
@@ -167,6 +169,33 @@ static int append_page(uint32_t *ev, int idx, int max_words, uint32_t page_id, c
     return idx;
 }
 
+static uint64_t longrun_target_evals(uint32_t evals_per_sec) {
+    return (uint64_t)evals_per_sec * (uint64_t)AUTOEHW_LONGRUN_TARGET_SECONDS;
+}
+
+#if defined(AUTOEHW_BOARD_LONGRUN_MODE) && !defined(AUTOEHW_HOST_STUB)
+static uint32_t longrun_candidate_budget(uint32_t evals_per_sec) {
+    uint64_t candidate_budget = longrun_target_evals(evals_per_sec) /
+                                (uint64_t)AUTOEHW_TRAIN_EVALS_PER_CANDIDATE;
+    if (candidate_budget > (uint64_t)AUTOEHW_LONGRUN_MAX_CANDIDATES) {
+        return AUTOEHW_LONGRUN_MAX_CANDIDATES;
+    }
+    return (uint32_t)candidate_budget;
+}
+
+static uint32_t longrun_heartbeat_candidates(uint32_t evals_per_sec) {
+    uint64_t heartbeat = ((uint64_t)evals_per_sec * (uint64_t)AUTOEHW_LONGRUN_HEARTBEAT_SECONDS) /
+                         (uint64_t)AUTOEHW_TRAIN_EVALS_PER_CANDIDATE;
+    if (heartbeat == 0u) {
+        return 1u;
+    }
+    if (heartbeat > (uint64_t)AUTOEHW_LONGRUN_MAX_CANDIDATES) {
+        return AUTOEHW_LONGRUN_MAX_CANDIDATES;
+    }
+    return (uint32_t)heartbeat;
+}
+#endif
+
 static int append_summary_page(uint32_t *ev, int idx, int max_words) {
     uint32_t payloads[6];
     int payload_count = (int)(sizeof(payloads) / sizeof(payloads[0]));
@@ -183,7 +212,7 @@ static int append_summary_page(uint32_t *ev, int idx, int max_words) {
 static int append_longrun_page(uint32_t *ev, int idx, int max_words) {
     uint32_t payloads[6];
     uint64_t evals_per_sec = (uint64_t)(ev[7] & 0x00FFFFFFu);
-    uint64_t target_evals = evals_per_sec * (uint64_t)AUTOEHW_LONGRUN_TARGET_SECONDS;
+    uint64_t target_evals = longrun_target_evals((uint32_t)evals_per_sec);
     uint64_t candidate_budget = target_evals / (uint64_t)AUTOEHW_TRAIN_EVALS_PER_CANDIDATE;
     int payload_count = (int)(sizeof(payloads) / sizeof(payloads[0]));
 
@@ -197,18 +226,14 @@ static int append_longrun_page(uint32_t *ev, int idx, int max_words) {
     return append_page(ev, idx, max_words, AUTOEHW_PAGE_ID_LONGRUN, payloads, payload_count);
 }
 
-#ifdef AUTOEHW_HOST_STUB
-static int append_monitor_page(
-    uint32_t *ev,
-    int idx,
-    int max_words,
-    const autoehw_progress_t *progress
-) {
-    uint32_t payloads[7];
+#if defined(AUTOEHW_HOST_STUB) || defined(AUTOEHW_BOARD_LONGRUN_MODE)
+static void monitor_payloads(const autoehw_progress_t *progress, uint32_t *payloads, int payload_count) {
     uint64_t generation = (uint64_t)(uint32_t)progress->generation;
     uint64_t evals = (uint64_t)(uint32_t)progress->evals;
-    int payload_count = (int)(sizeof(payloads) / sizeof(payloads[0]));
 
+    if (payload_count < 7) {
+        return;
+    }
     payloads[0] = (0x03u << 16) | (progress->done ? 0x00F1u : 0x0001u);
     payloads[1] = (uint32_t)(generation & 0x003FFFFFu);
     payloads[2] = (uint32_t)((generation >> 22) & 0x003FFFFFu);
@@ -217,22 +242,60 @@ static int append_monitor_page(
     payloads[5] = (((uint32_t)progress->best_train_passed & 0x0FFFu) << 12) |
                   ((uint32_t)progress->train_total & 0x0FFFu);
     payloads[6] = pack_config_payload(progress->best_config);
-
-    return append_page(ev, idx, max_words, AUTOEHW_PAGE_ID_MONITOR, payloads, payload_count);
 }
 
-typedef struct {
-    uint32_t *ev;
-    int idx;
-    int max_words;
-} monitor_page_ctx_t;
+static void publish_page(uint32_t page_id, const uint32_t *payloads, int payload_count) {
+    publish(MBOX_PAGE_HEADER_TAG | ((page_id & 0xFFu) << 16) | (uint32_t)payload_count);
+    for (int i = 0; i < payload_count; i++) {
+        publish(MBOX_PAGE_DATA_TAG | (((uint32_t)i & 0x03u) << 22) | (payloads[i] & 0x003FFFFFu));
+    }
+    publish(MBOX_PAGE_END_TAG | page_checksum(page_id, payloads, payload_count));
+}
 
-static void append_monitor_progress(void *ctx, const autoehw_progress_t *progress) {
-    monitor_page_ctx_t *monitor = (monitor_page_ctx_t *)ctx;
-    if (monitor == 0 || progress == 0) {
+static void publish_monitor_progress(void *ctx, const autoehw_progress_t *progress) {
+    uint32_t payloads[7];
+    int payload_count = (int)(sizeof(payloads) / sizeof(payloads[0]));
+
+    (void)ctx;
+    if (progress == 0) {
         return;
     }
-    monitor->idx = append_monitor_page(monitor->ev, monitor->idx, monitor->max_words, progress);
+    monitor_payloads(progress, payloads, payload_count);
+    publish_page(AUTOEHW_PAGE_ID_MONITOR, payloads, payload_count);
+}
+
+#if defined(AUTOEHW_BOARD_LONGRUN_MODE) && !defined(AUTOEHW_HOST_STUB)
+static int append_monitor_page(
+    uint32_t *ev,
+    int idx,
+    int max_words,
+    const autoehw_progress_t *progress
+) {
+    uint32_t payloads[7];
+    int payload_count = (int)(sizeof(payloads) / sizeof(payloads[0]));
+
+    if (progress == 0) {
+        return idx;
+    }
+    monitor_payloads(progress, payloads, payload_count);
+    return append_page(ev, idx, max_words, AUTOEHW_PAGE_ID_MONITOR, payloads, payload_count);
+}
+#endif
+
+static autoehw_search_result_t run_train_only_with_live_monitor(
+    const autoehw_backend_t *backend,
+    int budget,
+    int heartbeat_generations
+) {
+    return autoehw_firmware_run_train_only_monitored(
+        backend,
+        budget,
+        AUTOEHW_BOARD_SEED,
+        AUTOEHW_BOARD_FRAMES,
+        heartbeat_generations,
+        publish_monitor_progress,
+        0
+    );
 }
 #endif
 
@@ -337,12 +400,7 @@ void autoehw_host_seed_persisted_champion(void) {
 
 int autoehw_host_run_longrun_monitor_smoke(void) {
     autoehw_backend_t backend = {0, autoehw_fake_eval_frame};
-    uint32_t monitor_words[48];
-    monitor_page_ctx_t monitor = {
-        .ev = monitor_words,
-        .idx = 0,
-        .max_words = (int)(sizeof(monitor_words) / sizeof(monitor_words[0])),
-    };
+    autoehw_search_result_t result;
 
     reset_host_mailbox();
     publish(MBOX_REACHED_MAIN);
@@ -350,19 +408,12 @@ int autoehw_host_run_longrun_monitor_smoke(void) {
             ((uint32_t)AUTOEHW_LONGRUN_MONITOR_SMOKE_BUDGET << 8) |
             (uint32_t)AUTOEHW_BOARD_FRAMES);
 
-    autoehw_search_result_t result = autoehw_firmware_run_train_only_monitored(
+    result = run_train_only_with_live_monitor(
         &backend,
         AUTOEHW_LONGRUN_MONITOR_SMOKE_BUDGET,
-        AUTOEHW_BOARD_SEED,
-        AUTOEHW_BOARD_FRAMES,
-        AUTOEHW_LONGRUN_MONITOR_HEARTBEAT,
-        append_monitor_progress,
-        &monitor
+        AUTOEHW_LONGRUN_MONITOR_HEARTBEAT
     );
 
-    for (int i = 0; i < monitor.idx; i++) {
-        publish(monitor_words[i]);
-    }
     publish(pack_config(MBOX_FINAL_CFG_TAG, result.best_config));
     publish(pack_score(MBOX_FINAL_TRAIN_TAG, result.best_train_passed, result.train_total));
     publish(pack_score(MBOX_FINAL_HOLDOUT_TAG, result.holdout_passed, result.holdout_total));
@@ -382,7 +433,7 @@ int autoehw_board_main(void) {
 
     champion_store_t champion_store = {0, {16, 0, 1}, 0, AUTOEHW_WRITE_BUDGET};
     champion_store_t restored_store = {0, {16, 0, 1}, 0, AUTOEHW_WRITE_BUDGET};
-    uint32_t ev[32];
+    uint32_t ev[64];
     int ev_count;
     uint64_t start_cycles;
     uint64_t end_cycles;
@@ -440,13 +491,48 @@ int autoehw_board_main(void) {
         publish(ev[i]);
     }
 
+#if defined(AUTOEHW_BOARD_LONGRUN_MODE) && !defined(AUTOEHW_HOST_STUB)
+    {
+        uint32_t measured_evals_per_sec = ev[7] & 0x00FFFFFFu;
+        uint32_t longrun_budget = longrun_candidate_budget(measured_evals_per_sec);
+        uint32_t heartbeat_generations = longrun_heartbeat_candidates(measured_evals_per_sec);
+        autoehw_search_result_t longrun_result;
+        autoehw_progress_t final_progress;
+
+        if (longrun_budget == 0u) {
+            longrun_budget = 1u;
+        }
+        longrun_result = run_train_only_with_live_monitor(
+            &backend,
+            (int)longrun_budget,
+            (int)heartbeat_generations
+        );
+        publish(pack_config(MBOX_FINAL_CFG_TAG, longrun_result.best_config));
+        publish(pack_score(MBOX_FINAL_TRAIN_TAG, longrun_result.best_train_passed, longrun_result.train_total));
+        publish(pack_score(MBOX_FINAL_HOLDOUT_TAG, longrun_result.holdout_passed, longrun_result.holdout_total));
+        publish(MBOX_DONE_TAG | ((uint32_t)longrun_result.evals & 0x00FFFFFFu));
+
+        final_progress.generation = (int)longrun_budget;
+        final_progress.evals = longrun_result.evals;
+        final_progress.best_train_passed = longrun_result.best_train_passed;
+        final_progress.train_total = longrun_result.train_total;
+        final_progress.done = 1;
+        final_progress.best_config = longrun_result.best_config;
+        ev_count = append_monitor_page(ev, ev_count, (int)(sizeof(ev) / sizeof(ev[0])), &final_progress);
+        if (ev_count + 4 <= (int)(sizeof(ev) / sizeof(ev[0]))) {
+            ev[ev_count++] = pack_config(MBOX_FINAL_CFG_TAG, longrun_result.best_config);
+            ev[ev_count++] = pack_score(MBOX_FINAL_TRAIN_TAG, longrun_result.best_train_passed, longrun_result.train_total);
+            ev[ev_count++] = pack_score(MBOX_FINAL_HOLDOUT_TAG, longrun_result.holdout_passed, longrun_result.holdout_total);
+            ev[ev_count++] = MBOX_DONE_TAG | ((uint32_t)longrun_result.evals & 0x00FFFFFFu);
+        }
+    }
+#endif
+
 #ifndef AUTOEHW_HOST_STUB
-    /* Board-only observability (does not touch the search/compute or the
-     * host-stub path; host gates unaffected). soc_dfx mbox_reg latches the last
-     * written value, so a one-shot sequence leaves only ev[5] visible to a
-     * U-Boot `md` poll. Re-emit all six evidence words forever with a long dwell
-     * (~1 s/word) so the host can sample every word across polls. This is the
-     * zynq-ehw EHW-3.2 republish lesson. */
+    /* Board-only observability. soc_dfx mbox_reg latches the last written value,
+     * so a one-shot sequence leaves only the final value visible to a U-Boot
+     * `md` poll. Re-emit the evidence carousel forever with a long dwell
+     * (~1 s/word) so the host can sample every word across polls. */
     for (;;) {
         for (int i = 0; i < ev_count; i++) {
             MBOX = ev[i];
