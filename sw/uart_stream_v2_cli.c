@@ -82,6 +82,31 @@ int main(int argc, char **argv) {
         return 0;
     }
 
-    fprintf(stderr, "usage: %s score <raw_genome> <frames> | ab <budget> <seed> <frames>\n", argv[0]);
+    if (argc >= 2 && strcmp(argv[1], "variant") == 0) {
+        if (argc != 7) {
+            fprintf(stderr, "usage: %s variant <variant> <budget> <seed> <train_frames> <holdout_frames>\n", argv[0]);
+            return 2;
+        }
+        const char *variant = argv[2];
+        int budget = (int)parse_long(argv[3], "budget");
+        uint16_t seed = (uint16_t)parse_u64(argv[4], "seed");
+        int train_frames = (int)parse_long(argv[5], "train_frames");
+        int holdout_frames = (int)parse_long(argv[6], "holdout_frames");
+        uart_stream_v2_arm_result_t result = uart_v2_variant_arm_train_holdout(
+            variant,
+            budget,
+            seed,
+            train_frames,
+            holdout_frames
+        );
+        print_arm(variant, result);
+        return 0;
+    }
+
+    fprintf(
+        stderr,
+        "usage: %s score <raw_genome> <frames> | ab <budget> <seed> <frames> | variant <variant> <budget> <seed> <train_frames> <holdout_frames>\n",
+        argv[0]
+    );
     return 2;
 }

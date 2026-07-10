@@ -185,6 +185,32 @@ static uart_stream_v2_arm_result_t make_empty_result(void) {
     return result;
 }
 
+static void update_best_if_better(
+    uart_stream_v2_arm_result_t *result,
+    uart_sampler_genome_v2_t genome,
+    int candidate_passed,
+    int candidate_total,
+    int accept_tie
+) {
+    if (result == NULL) {
+        return;
+    }
+    if (result->train_total == 0 ||
+        candidate_passed > result->best_train_passed ||
+        (accept_tie && candidate_passed == result->best_train_passed)) {
+        result->best_genome = genome;
+        result->best_train_passed = candidate_passed;
+        result->train_total = candidate_total;
+    }
+}
+
+static void finalize_holdout(uart_stream_v2_arm_result_t *result, int holdout_frames) {
+    if (result == NULL) {
+        return;
+    }
+    result->holdout_passed = uart_v2_score_split("holdout", result->best_genome, holdout_frames, &result->holdout_total);
+}
+
 uart_stream_v2_arm_result_t uart_v2_random_arm_train_only(int budget, uint16_t seed, int frames) {
     uint16_t state = seed;
     int best_train_passed = -1;
@@ -233,6 +259,162 @@ uart_stream_v2_arm_result_t uart_v2_ga_arm_train_only(int budget, uint16_t seed,
         }
     }
     result.holdout_passed = uart_v2_score_split("holdout", result.best_genome, frames, &result.holdout_total);
+    return result;
+}
+
+uart_stream_v2_arm_result_t uart_v2_restart_hillclimb_arm_train_only(int budget, uint16_t seed, int frames) {
+    enum { RESTARTS = 16 };
+    uint16_t state = seed;
+    uart_stream_v2_arm_result_t global = make_empty_result();
+
+    if (budget <= 0) {
+        return global;
+    }
+    for (int restart = 0; restart < RESTARTS; restart++) {
+        int local_budget = budget / RESTARTS + (restart < (budget % RESTARTS) ? 1 : 0);
+        uart_stream_v2_arm_result_t local = make_empty_result();
+        int local_best = 0;
+
+        for (int gen = 0; gen < local_budget; gen++) {
+            uart_sampler_genome_v2_t genome;
+            int candidate_total = 0;
+            int candidate_passed;
+
+            if (gen == 0) {
+                genome = uart_v2_random_genome(&state);
+            } else {
+                genome = uart_v2_mutate_genome(&state, local.best_genome);
+            }
+            candidate_passed = uart_v2_score_split("train", genome, frames, &candidate_total);
+            local.evals += candidate_total;
+            if (gen == 0 || candidate_passed >= local_best) {
+                local_best = candidate_passed;
+                local.best_genome = genome;
+                local.best_train_passed = candidate_passed;
+                local.train_total = candidate_total;
+            }
+        }
+        global.evals += local.evals;
+        update_best_if_better(&global, local.best_genome, local.best_train_passed, local.train_total, 0);
+    }
+    finalize_holdout(&global, frames);
+    return global;
+}
+
+uart_stream_v2_arm_result_t uart_v2_immigrant_hillclimb_arm_train_only(int budget, uint16_t seed, int frames) {
+    enum { IMMIGRANT_PERIOD = 64 };
+    uint16_t state = seed;
+    int best_train_passed = 0;
+    uart_stream_v2_arm_result_t result = make_empty_result();
+
+    if (budget <= 0) {
+        return result;
+    }
+    for (int gen = 0; gen < budget; gen++) {
+        uart_sampler_genome_v2_t genome;
+        int candidate_total = 0;
+        int candidate_passed;
+
+        if (gen == 0 || (gen % IMMIGRANT_PERIOD) == 0) {
+            genome = uart_v2_random_genome(&state);
+        } else {
+            genome = uart_v2_mutate_genome(&state, result.best_genome);
+        }
+        candidate_passed = uart_v2_score_split("train", genome, frames, &candidate_total);
+        result.evals += candidate_total;
+        if (gen == 0 || candidate_passed >= best_train_passed) {
+            best_train_passed = candidate_passed;
+            result.best_genome = genome;
+            result.best_train_passed = candidate_passed;
+            result.train_total = candidate_total;
+        }
+    }
+    finalize_holdout(&result, frames);
+    return result;
+}
+
+uart_stream_v2_arm_result_t uart_v2_beam4_ga_arm_train_only(int budget, uint16_t seed, int frames) {
+    enum { POP = 4 };
+    uint16_t state = seed;
+    uart_sampler_genome_v2_t pop[POP];
+    int scores[POP] = {0, 0, 0, 0};
+    int totals[POP] = {0, 0, 0, 0};
+    int filled = 0;
+    uart_stream_v2_arm_result_t result = make_empty_result();
+
+    if (budget <= 0) {
+        return result;
+    }
+    for (int gen = 0; gen < budget; gen++) {
+        uart_sampler_genome_v2_t genome;
+        int candidate_total = 0;
+        int candidate_passed;
+
+        if (filled < POP) {
+            genome = uart_v2_random_genome(&state);
+        } else {
+            int parent = (int)(rand16(&state) % POP);
+            genome = uart_v2_mutate_genome(&state, pop[parent]);
+        }
+
+        candidate_passed = uart_v2_score_split("train", genome, frames, &candidate_total);
+        result.evals += candidate_total;
+
+        if (filled < POP) {
+            pop[filled] = genome;
+            scores[filled] = candidate_passed;
+            totals[filled] = candidate_total;
+            filled++;
+        } else {
+            int worst = 0;
+            for (int idx = 1; idx < POP; idx++) {
+                if (scores[idx] < scores[worst]) {
+                    worst = idx;
+                }
+            }
+            if (candidate_passed >= scores[worst]) {
+                pop[worst] = genome;
+                scores[worst] = candidate_passed;
+                totals[worst] = candidate_total;
+            }
+        }
+        update_best_if_better(&result, genome, candidate_passed, candidate_total, 1);
+    }
+    if (result.train_total == 0) {
+        for (int idx = 0; idx < filled; idx++) {
+            update_best_if_better(&result, pop[idx], scores[idx], totals[idx], 1);
+        }
+    }
+    finalize_holdout(&result, frames);
+    return result;
+}
+
+uart_stream_v2_arm_result_t uart_v2_variant_arm_train_holdout(
+    const char *variant,
+    int budget,
+    uint16_t seed,
+    int train_frames,
+    int holdout_frames
+) {
+    uart_stream_v2_arm_result_t result = make_empty_result();
+
+    if (variant == NULL || budget <= 0 || train_frames <= 0 || holdout_frames <= 0) {
+        return result;
+    }
+    if (streq(variant, "current_hillclimb")) {
+        result = uart_v2_ga_arm_train_only(budget, seed, train_frames);
+    } else if (streq(variant, "restart_hillclimb_v3")) {
+        result = uart_v2_restart_hillclimb_arm_train_only(budget, seed, train_frames);
+    } else if (streq(variant, "immigrant_hillclimb_v3")) {
+        result = uart_v2_immigrant_hillclimb_arm_train_only(budget, seed, train_frames);
+    } else if (streq(variant, "beam4_ga_v3")) {
+        result = uart_v2_beam4_ga_arm_train_only(budget, seed, train_frames);
+    } else if (streq(variant, "random")) {
+        result = uart_v2_random_arm_train_only(budget, seed, train_frames);
+    } else {
+        return result;
+    }
+    result.holdout_passed = uart_v2_score_split("holdout", result.best_genome, holdout_frames, &result.holdout_total);
     return result;
 }
 

@@ -11,6 +11,7 @@ from sim.uart_stream_v2 import (
     encode_genome,
     genome_space_size,
     same_boot_ab_search,
+    variant_arm_train_only,
     build_run_log_fixture,
     score_set,
 )
@@ -140,6 +141,72 @@ class UartStreamV2HeadroomTest(unittest.TestCase):
         )
         self.assertEqual(parsed["ga"]["evals"], budget * 4 * frames)
         self.assertEqual(parsed["random"]["evals"], budget * 4 * frames)
+
+    def test_c_twin_matches_python_v3_variants(self):
+        if not V2_C_TWIN.exists():
+            self.skipTest(f"v2 C twin not built: {V2_C_TWIN}")
+        budget = 48
+        train_frames = 4
+        holdout_frames = 8
+        seed = 0x1357
+        for variant in (
+            "current_hillclimb",
+            "restart_hillclimb_v3",
+            "immigrant_hillclimb_v3",
+            "beam4_ga_v3",
+        ):
+            result = variant_arm_train_only(variant, budget, seed, train_frames)
+            train = score_set("train", result.best_genome, train_frames)
+            holdout = score_set("holdout", result.best_genome, holdout_frames)
+            proc = subprocess.run(
+                [str(V2_C_TWIN), "variant", variant, str(budget), hex(seed), str(train_frames), str(holdout_frames)],
+                cwd=ROOT,
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            fields = proc.stdout.strip().split()
+            self.assertEqual(int(fields[2], 16), encode_genome(result.best_genome), variant)
+            self.assertEqual((int(fields[12]), int(fields[13])), (
+                sum(score.passed for score in train.conditions),
+                sum(score.frames for score in train.conditions),
+            ), variant)
+            self.assertEqual((int(fields[15]), int(fields[16])), (
+                sum(score.passed for score in holdout.conditions),
+                sum(score.frames for score in holdout.conditions),
+            ), variant)
+
+    def test_v3_screening_script_smoke(self):
+        if not V2_C_TWIN.exists():
+            self.skipTest(f"v2 C twin not built: {V2_C_TWIN}")
+        proc = subprocess.run(
+            [
+                "python3",
+                "host/screen_v3_search.py",
+                "--cli",
+                str(V2_C_TWIN),
+                "--budget",
+                "16",
+                "--train-frames",
+                "4",
+                "--holdout-frames",
+                "8",
+                "--seeds",
+                "0x1357,0x2468",
+                "--variants",
+                "current_hillclimb,restart_hillclimb_v3",
+                "--jobs",
+                "2",
+                "--json",
+            ],
+            cwd=ROOT,
+            check=True,
+            text=True,
+            capture_output=True,
+        )
+        report = json.loads(proc.stdout)
+        self.assertEqual(report["budget"], 16)
+        self.assertEqual(set(report["variants"].keys()), {"current_hillclimb", "restart_hillclimb_v3"})
 
     def test_firmware_fake_backend_matches_python_same_boot_ab_search(self):
         if not V2_FIRMWARE.exists():

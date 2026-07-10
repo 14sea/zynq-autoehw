@@ -39,6 +39,16 @@ int uart_v2_score_split(const char *split, uart_sampler_genome_v2_t genome, int 
 uart_sampler_genome_v2_t uart_v2_random_genome(uint16_t *state);
 uart_sampler_genome_v2_t uart_v2_mutate_genome(uint16_t *state, uart_sampler_genome_v2_t parent);
 uart_stream_v2_arm_result_t uart_v2_ga_arm_train_only(int budget, uint16_t seed, int frames);
+uart_stream_v2_arm_result_t uart_v2_restart_hillclimb_arm_train_only(int budget, uint16_t seed, int frames);
+uart_stream_v2_arm_result_t uart_v2_immigrant_hillclimb_arm_train_only(int budget, uint16_t seed, int frames);
+uart_stream_v2_arm_result_t uart_v2_beam4_ga_arm_train_only(int budget, uint16_t seed, int frames);
+uart_stream_v2_arm_result_t uart_v2_variant_arm_train_holdout(
+    const char *variant,
+    int budget,
+    uint16_t seed,
+    int train_frames,
+    int holdout_frames
+);
 uart_stream_v2_arm_result_t uart_v2_random_arm_train_only(int budget, uint16_t seed, int frames);
 uart_stream_v2_ab_result_t uart_v2_same_boot_ab_search(int budget, uint16_t seed, int frames);
 

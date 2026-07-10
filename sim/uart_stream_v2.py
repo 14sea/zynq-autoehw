@@ -259,6 +259,109 @@ def ga_arm_train_only(budget: int, seed: int, frames: int = DEFAULT_FRAMES) -> A
     return ArmResult("ga", best_genome, best_fitness, tuple(generations))
 
 
+def restart_hillclimb_arm_train_only(budget: int, seed: int, frames: int = DEFAULT_FRAMES) -> ArmResult:
+    if budget <= 0:
+        raise ValueError("budget must be positive")
+    state = seed & 0xFFFF
+    restarts = 16
+    best_genome = STATIC_BASELINE
+    best_passed = -1
+    total = len(conditions_for("train")) * frames
+
+    for restart in range(restarts):
+        local_budget = budget // restarts + (1 if restart < (budget % restarts) else 0)
+        local_genome = STATIC_BASELINE
+        local_passed = -1
+        for gen in range(local_budget):
+            if gen == 0:
+                state, genome = random_genome(state)
+            else:
+                state, genome = mutate_genome(state, local_genome)
+            train = score_set("train", genome, frames)
+            passed = sum(score.passed for score in train.conditions)
+            if gen == 0 or passed >= local_passed:
+                local_genome = genome
+                local_passed = passed
+        if local_budget > 0 and local_passed > best_passed:
+            best_genome = local_genome
+            best_passed = local_passed
+
+    return ArmResult("restart_hillclimb_v3", best_genome, best_passed / total, tuple())
+
+
+def immigrant_hillclimb_arm_train_only(budget: int, seed: int, frames: int = DEFAULT_FRAMES) -> ArmResult:
+    if budget <= 0:
+        raise ValueError("budget must be positive")
+    state = seed & 0xFFFF
+    best_genome = STATIC_BASELINE
+    best_passed = -1
+    total = len(conditions_for("train")) * frames
+
+    for gen in range(budget):
+        if gen == 0 or (gen % 64) == 0:
+            state, genome = random_genome(state)
+        else:
+            state, genome = mutate_genome(state, best_genome)
+        train = score_set("train", genome, frames)
+        passed = sum(score.passed for score in train.conditions)
+        if gen == 0 or passed >= best_passed:
+            best_genome = genome
+            best_passed = passed
+
+    return ArmResult("immigrant_hillclimb_v3", best_genome, best_passed / total, tuple())
+
+
+def beam4_ga_arm_train_only(budget: int, seed: int, frames: int = DEFAULT_FRAMES) -> ArmResult:
+    if budget <= 0:
+        raise ValueError("budget must be positive")
+    state = seed & 0xFFFF
+    pop: list[SamplerGenomeV2] = []
+    scores: list[int] = []
+    best_genome = STATIC_BASELINE
+    best_passed = -1
+    total = len(conditions_for("train")) * frames
+
+    for _gen in range(budget):
+        if len(pop) < 4:
+            state, genome = random_genome(state)
+        else:
+            state, parent_rnd = _rand16(state)
+            state, genome = mutate_genome(state, pop[parent_rnd % 4])
+        train = score_set("train", genome, frames)
+        passed = sum(score.passed for score in train.conditions)
+
+        if len(pop) < 4:
+            pop.append(genome)
+            scores.append(passed)
+        else:
+            worst = min(range(4), key=lambda idx: scores[idx])
+            if passed >= scores[worst]:
+                pop[worst] = genome
+                scores[worst] = passed
+
+        if passed >= best_passed:
+            best_genome = genome
+            best_passed = passed
+
+    return ArmResult("beam4_ga_v3", best_genome, best_passed / total, tuple())
+
+
+def variant_arm_train_only(variant: str, budget: int, seed: int, frames: int = DEFAULT_FRAMES) -> ArmResult:
+    if variant == "current_hillclimb":
+        result = ga_arm_train_only(budget, seed, frames)
+        return ArmResult(variant, result.best_genome, result.best_fitness_train, result.generations)
+    if variant == "restart_hillclimb_v3":
+        return restart_hillclimb_arm_train_only(budget, seed, frames)
+    if variant == "immigrant_hillclimb_v3":
+        return immigrant_hillclimb_arm_train_only(budget, seed, frames)
+    if variant == "beam4_ga_v3":
+        return beam4_ga_arm_train_only(budget, seed, frames)
+    if variant == "random":
+        result = random_arm_train_only(budget, seed, frames)
+        return ArmResult(variant, result.best_genome, result.best_fitness_train, result.generations)
+    raise ValueError(f"unknown v2 search variant: {variant}")
+
+
 def same_boot_ab_search(budget: int, seed: int, frames: int = DEFAULT_FRAMES) -> ABResult:
     return ABResult(
         seed=seed,
