@@ -21,7 +21,7 @@ from sim.uart_stream_v2 import (  # noqa: E402
 
 HEX_RE = re.compile(r"(?:0x)?([0-9a-fA-F]{8})")
 BUDGET = 8
-FRAMES = 4
+FRAMES = 64
 HOLDOUT_FRAMES = 256
 SEED = 0xC0DE
 HEARTBEAT = 2
@@ -155,7 +155,7 @@ def main() -> int:
     expected_len = 3 + 10 + 4 * 10 + 4 * 10 + 2 * 9
     if len(words) != expected_len:
         return fail(f"need exactly {expected_len} words, got {len(words)}")
-    if words[:3] != [0xA7000000, 0xA8000804, 0xAD00C0DE]:
+    if words[:3] != [0xA7000000, 0xA8000840, 0xAD00C0DE]:
         return fail("v2 A/B long-run smoke prefix mismatch")
 
     offset = 3

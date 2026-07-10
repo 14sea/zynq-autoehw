@@ -45,10 +45,12 @@
 #define AUTOEHW_LEGACY_WORD_COUNT 15u
 #define AUTOEHW_V2_AB_BUDGET 16
 #define AUTOEHW_V2_AB_FRAMES 4
+#define AUTOEHW_V2_LONGRUN_TRAIN_FRAMES 64
 #define AUTOEHW_V2_FINAL_HOLDOUT_FRAMES 256
 #define AUTOEHW_V2_AB_LONGRUN_SMOKE_BUDGET 8
 #define AUTOEHW_V2_AB_LONGRUN_SMOKE_HEARTBEAT 2
 #define AUTOEHW_V2_TRAIN_EVALS_PER_CANDIDATE (4u * AUTOEHW_V2_AB_FRAMES)
+#define AUTOEHW_V2_LONGRUN_TRAIN_EVALS_PER_CANDIDATE (4u * AUTOEHW_V2_LONGRUN_TRAIN_FRAMES)
 #define AUTOEHW_V2_EPS_PROBE_CANDIDATES 32
 #define AUTOEHW_V2_EPS_PROBE_SEED 0x51A7u
 #define AUTOEHW_LONGRUN_TARGET_SECONDS 7200u
@@ -213,7 +215,7 @@ static uint32_t longrun_heartbeat_candidates(uint32_t evals_per_sec) {
 #if defined(AUTOEHW_BOARD_V2_AB_LONGRUN_MODE) && !defined(AUTOEHW_HOST_STUB)
 static uint32_t v2_ab_longrun_arm_budget(uint32_t evals_per_sec) {
     uint64_t candidate_budget = longrun_target_evals(evals_per_sec) /
-                                (uint64_t)(2u * AUTOEHW_V2_TRAIN_EVALS_PER_CANDIDATE);
+                                (uint64_t)(2u * AUTOEHW_V2_LONGRUN_TRAIN_EVALS_PER_CANDIDATE);
     if (candidate_budget == 0u) {
         return 1u;
     }
@@ -225,7 +227,7 @@ static uint32_t v2_ab_longrun_arm_budget(uint32_t evals_per_sec) {
 
 static uint32_t v2_ab_heartbeat_candidates(uint32_t evals_per_sec) {
     uint64_t heartbeat = ((uint64_t)evals_per_sec * (uint64_t)AUTOEHW_LONGRUN_HEARTBEAT_SECONDS) /
-                         (uint64_t)AUTOEHW_V2_TRAIN_EVALS_PER_CANDIDATE;
+                         (uint64_t)AUTOEHW_V2_LONGRUN_TRAIN_EVALS_PER_CANDIDATE;
     if (heartbeat == 0u) {
         return 1u;
     }
@@ -333,12 +335,12 @@ static int append_v2_calibration_page(
 
     payloads[0] = (0x08u << 16) | (AUTOEHW_LONGRUN_TARGET_SECONDS / 60u);
     payloads[1] = v2_evals_per_sec & 0x003FFFFFu;
-    payloads[2] = AUTOEHW_V2_TRAIN_EVALS_PER_CANDIDATE;
+    payloads[2] = AUTOEHW_V2_LONGRUN_TRAIN_EVALS_PER_CANDIDATE;
     payloads[3] = arm_budget & 0x003FFFFFu;
     payloads[4] = (arm_budget >> 22) & 0x003FFFFFu;
     payloads[5] = heartbeat_generations & 0x003FFFFFu;
     payloads[6] = (heartbeat_generations >> 22) & 0x003FFFFFu;
-    payloads[7] = (AUTOEHW_V2_EPS_PROBE_CANDIDATES * AUTOEHW_V2_TRAIN_EVALS_PER_CANDIDATE) & 0x003FFFFFu;
+    payloads[7] = (AUTOEHW_V2_EPS_PROBE_CANDIDATES * AUTOEHW_V2_LONGRUN_TRAIN_EVALS_PER_CANDIDATE) & 0x003FFFFFu;
 
     return append_page(ev, idx, max_words, AUTOEHW_PAGE_ID_V2_CALIBRATION, payloads, payload_count);
 }
@@ -505,7 +507,7 @@ static uint32_t measure_v2_evals_per_sec(const autoehw_v2_backend_t *backend) {
             if (condition == 0 || condition->split[0] != 't') {
                 continue;
             }
-            for (int frame_idx = 0; frame_idx < AUTOEHW_V2_AB_FRAMES; frame_idx++) {
+            for (int frame_idx = 0; frame_idx < AUTOEHW_V2_LONGRUN_TRAIN_FRAMES; frame_idx++) {
                 (void)backend->eval_frame(backend->ctx, condition, genome, frame_idx);
                 evals++;
             }
@@ -639,7 +641,7 @@ int autoehw_host_run_v2_ab_longrun_smoke(void) {
     publish(MBOX_REACHED_MAIN);
     publish(MBOX_PROGRESS_TAG |
             ((uint32_t)AUTOEHW_V2_AB_LONGRUN_SMOKE_BUDGET << 8) |
-            (uint32_t)AUTOEHW_V2_AB_FRAMES);
+            (uint32_t)AUTOEHW_V2_LONGRUN_TRAIN_FRAMES);
     publish(MBOX_SEED_TAG | (uint32_t)AUTOEHW_BOARD_SEED);
 
     v2_evals_per_sec = measure_v2_evals_per_sec(&backend);
@@ -660,7 +662,7 @@ int autoehw_host_run_v2_ab_longrun_smoke(void) {
         &backend,
         AUTOEHW_V2_AB_LONGRUN_SMOKE_BUDGET,
         AUTOEHW_BOARD_SEED,
-        AUTOEHW_V2_AB_FRAMES,
+        AUTOEHW_V2_LONGRUN_TRAIN_FRAMES,
         AUTOEHW_V2_FINAL_HOLDOUT_FRAMES,
         AUTOEHW_V2_AB_LONGRUN_SMOKE_HEARTBEAT,
         publish_v2_progress,
@@ -854,7 +856,7 @@ int autoehw_board_main(void) {
             &v2_backend,
             (int)arm_budget,
             AUTOEHW_BOARD_SEED,
-            AUTOEHW_V2_AB_FRAMES,
+            AUTOEHW_V2_LONGRUN_TRAIN_FRAMES,
             AUTOEHW_V2_FINAL_HOLDOUT_FRAMES,
             (int)heartbeat_generations,
             publish_v2_progress,

@@ -205,7 +205,7 @@ class UartStreamV2HeadroomTest(unittest.TestCase):
             capture_output=True,
         )
         words = [int(line, 16) for line in proc.stdout.strip().splitlines()]
-        self.assertEqual(words[:3], [0xA7000000, 0xA8000804, 0xAD00C0DE])
+        self.assertEqual(words[:3], [0xA7000000, 0xA8000840, 0xAD00C0DE])
         self.assertEqual(len(words), 111)
         check = subprocess.run(
             ["python3", "host/check_v2_ab_longrun_mailbox.py"],
