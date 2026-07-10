@@ -42,6 +42,8 @@ enum {
     V5_PBIL_LEARNING_SHIFT = 4,
     V5_PBIL_MUTATION_SHIFT = 5,
     V5_PBIL_RESTART_CHECKPOINT = 2048,
+    V6_ISLAND_SEED_SALT = 0x3000,
+    V6_ISLAND_SEED_STEP = 0x1F3D,
 };
 
 typedef struct {
@@ -829,6 +831,51 @@ uart_stream_v2_arm_result_t uart_v2_pbil_hybrid_v5_arm_train_only(int budget, ui
     );
 }
 
+static uint16_t island_seed(uint16_t seed, int island) {
+    uint16_t derived = (uint16_t)(seed ^ V6_ISLAND_SEED_SALT ^ (uint16_t)(island * V6_ISLAND_SEED_STEP));
+    return derived == 0 ? 0xACE1u : derived;
+}
+
+static uart_stream_v2_arm_result_t pbil_island_v6_arm_train_only(int budget, uint16_t seed, int frames, int islands) {
+    uart_stream_v2_arm_result_t result = make_empty_result();
+    int best_train_passed = -1;
+
+    if (budget <= 0 || islands <= 0) {
+        return result;
+    }
+
+    for (int island = 0; island < islands; island++) {
+        int island_budget = budget / islands + (island < (budget % islands) ? 1 : 0);
+        uart_stream_v2_arm_result_t candidate;
+
+        if (island_budget <= 0) {
+            continue;
+        }
+        candidate = uart_v2_pbil_eda_v4_arm_train_only(island_budget, island_seed(seed, island), frames);
+        result.evals += candidate.evals;
+        if (candidate.best_train_passed > best_train_passed) {
+            best_train_passed = candidate.best_train_passed;
+            result.best_genome = candidate.best_genome;
+            result.best_train_passed = candidate.best_train_passed;
+            result.train_total = candidate.train_total;
+        }
+    }
+    finalize_holdout(&result, frames);
+    return result;
+}
+
+uart_stream_v2_arm_result_t uart_v2_pbil_island2_v6_arm_train_only(int budget, uint16_t seed, int frames) {
+    return pbil_island_v6_arm_train_only(budget, seed, frames, 2);
+}
+
+uart_stream_v2_arm_result_t uart_v2_pbil_island3_v6_arm_train_only(int budget, uint16_t seed, int frames) {
+    return pbil_island_v6_arm_train_only(budget, seed, frames, 3);
+}
+
+uart_stream_v2_arm_result_t uart_v2_pbil_island4_v6_arm_train_only(int budget, uint16_t seed, int frames) {
+    return pbil_island_v6_arm_train_only(budget, seed, frames, 4);
+}
+
 uart_stream_v2_arm_result_t uart_v2_variant_arm_train_holdout(
     const char *variant,
     int budget,
@@ -859,6 +906,12 @@ uart_stream_v2_arm_result_t uart_v2_variant_arm_train_holdout(
         result = uart_v2_pbil_restart_v5_arm_train_only(budget, seed, train_frames);
     } else if (streq(variant, "pbil_hybrid_v5")) {
         result = uart_v2_pbil_hybrid_v5_arm_train_only(budget, seed, train_frames);
+    } else if (streq(variant, "pbil_island2_v6")) {
+        result = uart_v2_pbil_island2_v6_arm_train_only(budget, seed, train_frames);
+    } else if (streq(variant, "pbil_island3_v6")) {
+        result = uart_v2_pbil_island3_v6_arm_train_only(budget, seed, train_frames);
+    } else if (streq(variant, "pbil_island4_v6")) {
+        result = uart_v2_pbil_island4_v6_arm_train_only(budget, seed, train_frames);
     } else if (streq(variant, "random")) {
         result = uart_v2_random_arm_train_only(budget, seed, train_frames);
     } else {

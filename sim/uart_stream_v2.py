@@ -48,6 +48,8 @@ V5_PBIL_MAX_Q15 = 28672
 V5_PBIL_LEARNING_SHIFT = 4
 V5_PBIL_MUTATION_SHIFT = 5
 V5_PBIL_RESTART_CHECKPOINT = 2048
+V6_ISLAND_SEED_SALT = 0x3000
+V6_ISLAND_SEED_STEP = 0x1F3D
 
 
 @dataclass(frozen=True)
@@ -646,6 +648,49 @@ def pbil_hybrid_v5_arm_train_only(budget: int, seed: int, frames: int = DEFAULT_
     )
 
 
+def _island_seed(seed: int, island: int) -> int:
+    derived = (seed ^ V6_ISLAND_SEED_SALT ^ (island * V6_ISLAND_SEED_STEP)) & 0xFFFF
+    return derived if derived else 0xACE1
+
+
+def pbil_island_v6_arm_train_only(
+    arm: str,
+    islands: int,
+    budget: int,
+    seed: int,
+    frames: int = DEFAULT_FRAMES,
+) -> ArmResult:
+    if budget <= 0:
+        raise ValueError("budget must be positive")
+    if islands <= 0:
+        raise ValueError("islands must be positive")
+
+    best_genome = STATIC_BASELINE
+    best_fitness = -1.0
+    for island in range(islands):
+        island_budget = budget // islands + (1 if island < (budget % islands) else 0)
+        if island_budget <= 0:
+            continue
+        result = pbil_eda_v4_arm_train_only(island_budget, _island_seed(seed, island), frames)
+        if result.best_fitness_train > best_fitness:
+            best_genome = result.best_genome
+            best_fitness = result.best_fitness_train
+
+    return ArmResult(arm, best_genome, best_fitness, tuple())
+
+
+def pbil_island2_v6_arm_train_only(budget: int, seed: int, frames: int = DEFAULT_FRAMES) -> ArmResult:
+    return pbil_island_v6_arm_train_only("pbil_island2_v6", 2, budget, seed, frames)
+
+
+def pbil_island3_v6_arm_train_only(budget: int, seed: int, frames: int = DEFAULT_FRAMES) -> ArmResult:
+    return pbil_island_v6_arm_train_only("pbil_island3_v6", 3, budget, seed, frames)
+
+
+def pbil_island4_v6_arm_train_only(budget: int, seed: int, frames: int = DEFAULT_FRAMES) -> ArmResult:
+    return pbil_island_v6_arm_train_only("pbil_island4_v6", 4, budget, seed, frames)
+
+
 def variant_arm_train_only(variant: str, budget: int, seed: int, frames: int = DEFAULT_FRAMES) -> ArmResult:
     if variant == "current_hillclimb":
         result = ga_arm_train_only(budget, seed, frames)
@@ -666,6 +711,12 @@ def variant_arm_train_only(variant: str, budget: int, seed: int, frames: int = D
         return pbil_restart_v5_arm_train_only(budget, seed, frames)
     if variant == "pbil_hybrid_v5":
         return pbil_hybrid_v5_arm_train_only(budget, seed, frames)
+    if variant == "pbil_island2_v6":
+        return pbil_island2_v6_arm_train_only(budget, seed, frames)
+    if variant == "pbil_island3_v6":
+        return pbil_island3_v6_arm_train_only(budget, seed, frames)
+    if variant == "pbil_island4_v6":
+        return pbil_island4_v6_arm_train_only(budget, seed, frames)
     if variant == "random":
         result = random_arm_train_only(budget, seed, frames)
         return ArmResult(variant, result.best_genome, result.best_fitness_train, result.generations)
