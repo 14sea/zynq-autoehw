@@ -522,3 +522,54 @@ beats-random judgment needs the large-budget (multi-hour) same-boot A/B on the
    that are byte-identical to page 4's (both arms share holdout 2/16 → equal
    payloads across pages). Fixed by reconstructing one positional cycle from the
    timestamped transition trace (no dedup). Not a board or firmware issue.
+
+---
+
+## M1-full v2 headroom MULTI-HOUR same-boot A/B (beats-random judgment) (2026-07-09→10) — **PARTIAL**
+
+Long-run image `-DAUTOEHW_BOARD_V2_AB_LONGRUN_MODE`, `dfx_top.bit` md5 `6f103810…`.
+Recovered from a full usbipd detach (user re-attached FT232H + CH340) + Linux
+auto-boot (JTAG SLCR reset) → U-Boot; FCLK0=50 PASS; `fpga loadb`.
+
+**Calibration fix confirmed on silicon.** The previous attempt's budget was
+derived from the v1 evals/sec and would have run ~37 h (187 s heartbeats). The
+v2-speed-probe fix (commit `15a1d7f`, page 8 calibration) was verified live: the
+measured heartbeat cadence is now **~10.4 s** (median over 75 s), so the run
+landed at **~129 min** (T+7767 s, 861 transitions, 0 stuck alerts). v2
+throughput ≈ 1,658 evals/sec (18.7× slower than v1), exactly as the board-measured
+diagnosis predicted.
+
+### Result — GA beats random on TRAIN, ties on HOLDOUT
+
+Final champions decoded positionally from the carousel; both **bit-exact to the
+host v2 oracle**:
+
+| arm | genome | train | holdout |
+|---|---|---|---|
+| **GA (page 4)** | `0x08d590f3ee` | **4/16** | 2/16 |
+| random (page 5) | `0x6cbfb15fd8` | 2/16 | 2/16 |
+
+- **GA beats random on train, 4/16 vs 2/16 (2×), at equal budget** (~373 k
+  candidates/arm, same-boot, same seed rule). This is the first time the GA arm's
+  structure measurably beats random search — the 39-bit headroom space made the
+  comparison meaningful (v1's 24,576-point space could not).
+- **Holdout is a 2/16 tie → still not beats-random on holdout.**
+
+### Why the holdout tie, and the fix (the real blocker now)
+
+The holdout is only **16 evals** (4 conditions × **4 frames**). Its resolution is
+1/16 = 6.25 %, far coarser than the GA-vs-random gap. The GA's clear train
+advantage cannot manifest in a 16-sample holdout — a 2/16 tie is inside the
+quantization noise. **The beats-random-on-holdout judgment needs the final
+champions evaluated on a large holdout set (many frames, e.g. 128–256), so score
+resolution is finer than the arm gap.** The search can stay budget-limited; only
+the *final* champion holdout evaluation needs the extra frames.
+
+### Scope
+
+- ✅ Multi-hour same-boot A/B verified on silicon: correctly calibrated (~2 h,
+  10 s heartbeat), PC-free, equal-budget, bit-exact to the oracle; GA > random on
+  the optimization objective (train).
+- ❌ Not beats-random on holdout — blocked by holdout statistical resolution
+  (16 samples), not by the search. Next drop: high-frame final-champion holdout
+  evaluation (+ optionally a reported noise band) to make the judgment decidable.
