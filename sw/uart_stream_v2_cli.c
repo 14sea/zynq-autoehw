@@ -103,9 +103,44 @@ int main(int argc, char **argv) {
         return 0;
     }
 
+    if (argc >= 2 && strcmp(argv[1], "landscape") == 0) {
+        if (argc != 6) {
+            fprintf(stderr, "usage: %s landscape <kernel> <parent_raw> <seed> <frames>\n", argv[0]);
+            return 2;
+        }
+        const char *kernel = argv[2];
+        uart_sampler_genome_v2_t parent = uart_v2_decode_genome(parse_u64(argv[3], "parent_raw"));
+        uint16_t seed = (uint16_t)parse_u64(argv[4], "seed");
+        int frames = (int)parse_long(argv[5], "frames");
+        uart_sampler_genome_v2_t child;
+        int parent_total = 0;
+        int child_total = 0;
+        int parent_passed;
+        int child_passed;
+
+        if (!uart_v2_landscape_child(kernel, &seed, parent, &child)) {
+            fprintf(stderr, "unknown landscape kernel: %s\n", kernel);
+            return 2;
+        }
+        parent_passed = uart_v2_score_split("train", parent, frames, &parent_total);
+        child_passed = uart_v2_score_split("train", child, frames, &child_total);
+        printf(
+            "landscape kernel %s parent 0x%010" PRIx64 " child 0x%010" PRIx64
+            " parent_train %d %d child_train %d %d\n",
+            kernel,
+            uart_v2_encode_genome(parent),
+            uart_v2_encode_genome(child),
+            parent_passed,
+            parent_total,
+            child_passed,
+            child_total
+        );
+        return 0;
+    }
+
     fprintf(
         stderr,
-        "usage: %s score <raw_genome> <frames> | ab <budget> <seed> <frames> | variant <variant> <budget> <seed> <train_frames> <holdout_frames>\n",
+        "usage: %s score <raw_genome> <frames> | ab <budget> <seed> <frames> | variant <variant> <budget> <seed> <train_frames> <holdout_frames> | landscape <kernel> <parent_raw> <seed> <frames>\n",
         argv[0]
     );
     return 2;

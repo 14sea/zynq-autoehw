@@ -144,6 +144,53 @@ def mutate_genome(state: int, parent: SamplerGenomeV2) -> tuple[int, SamplerGeno
     return state, decode_genome(raw)
 
 
+def landscape_child(kernel: str, state: int, parent: SamplerGenomeV2) -> tuple[int, SamplerGenomeV2]:
+    raw = encode_genome(parent)
+    if kernel == "bitflip_1":
+        state, bit_rnd = _rand16(state)
+        raw ^= 1 << (bit_rnd % GENOME_BITS)
+        return state, decode_genome(raw)
+
+    if kernel == "bitflip_4":
+        used = 0
+        flips = 0
+        while flips < 4:
+            state, bit_rnd = _rand16(state)
+            bit = bit_rnd % GENOME_BITS
+            mask = 1 << bit
+            if used & mask:
+                continue
+            used |= mask
+            raw ^= mask
+            flips += 1
+        return state, decode_genome(raw)
+
+    if kernel == "field_resample":
+        state, field_rnd = _rand16(state)
+        field = field_rnd % 6
+        genome = parent
+        if field == 0:
+            state, value = _rand16(state)
+            genome = SamplerGenomeV2(value % 32, genome.threshold, genome.majority_idx, genome.tap_word)
+        elif field == 1:
+            state, value = _rand16(state)
+            genome = SamplerGenomeV2(genome.sample_phase, (value % 256) - 128, genome.majority_idx, genome.tap_word)
+        elif field == 2:
+            state, value = _rand16(state)
+            genome = SamplerGenomeV2(genome.sample_phase, genome.threshold, value % 4, genome.tap_word)
+        else:
+            state, value = _rand16(state)
+            shift = (field - 3) * 8
+            tap_word = (genome.tap_word & ~(0xFF << shift)) | ((value & 0xFF) << shift)
+            genome = SamplerGenomeV2(genome.sample_phase, genome.threshold, genome.majority_idx, tap_word)
+        return state, genome
+
+    if kernel == "full_random":
+        return random_genome(state)
+
+    raise ValueError(f"unknown landscape kernel: {kernel}")
+
+
 def _tap_bytes(genome: SamplerGenomeV2) -> tuple[int, int, int]:
     return (
         _signed8(genome.tap_word),

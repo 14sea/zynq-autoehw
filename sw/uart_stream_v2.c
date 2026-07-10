@@ -173,6 +173,71 @@ uart_sampler_genome_v2_t uart_v2_mutate_genome(uint16_t *state, uart_sampler_gen
     return uart_v2_decode_genome(raw);
 }
 
+int uart_v2_landscape_child(
+    const char *kernel,
+    uint16_t *state,
+    uart_sampler_genome_v2_t parent,
+    uart_sampler_genome_v2_t *child
+) {
+    uint64_t raw = uart_v2_encode_genome(parent);
+
+    if (kernel == NULL || state == NULL || child == NULL) {
+        return 0;
+    }
+
+    if (streq(kernel, "bitflip_1")) {
+        uint16_t bit_rnd = rand16(state);
+        raw ^= 1ULL << (bit_rnd % UART_STREAM_V2_GENOME_BITS);
+        *child = uart_v2_decode_genome(raw);
+        return 1;
+    }
+
+    if (streq(kernel, "bitflip_4")) {
+        uint64_t used = 0;
+        int flips = 0;
+        while (flips < 4) {
+            uint16_t bit_rnd = rand16(state);
+            int bit = (int)(bit_rnd % UART_STREAM_V2_GENOME_BITS);
+            uint64_t mask = 1ULL << bit;
+            if ((used & mask) != 0) {
+                continue;
+            }
+            used |= mask;
+            raw ^= mask;
+            flips++;
+        }
+        *child = uart_v2_decode_genome(raw);
+        return 1;
+    }
+
+    if (streq(kernel, "field_resample")) {
+        uint16_t field_rnd = rand16(state);
+        int field = (int)(field_rnd % 6u);
+        uart_sampler_genome_v2_t genome = parent;
+        uint16_t value = rand16(state);
+
+        if (field == 0) {
+            genome.sample_phase = (int)(value % 32u);
+        } else if (field == 1) {
+            genome.threshold = (int)(value % 256u) - 128;
+        } else if (field == 2) {
+            genome.majority_idx = (int)(value % 4u);
+        } else {
+            int shift = (field - 3) * 8;
+            genome.tap_word = (genome.tap_word & ~(0xFFu << shift)) | ((uint32_t)(value & 0xFFu) << shift);
+        }
+        *child = genome;
+        return 1;
+    }
+
+    if (streq(kernel, "full_random")) {
+        *child = uart_v2_random_genome(state);
+        return 1;
+    }
+
+    return 0;
+}
+
 static uart_stream_v2_arm_result_t make_empty_result(void) {
     uart_stream_v2_arm_result_t result = {
         .best_genome = k_static_baseline,

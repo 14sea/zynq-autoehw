@@ -38,6 +38,12 @@ uart_condition_score_t uart_v2_score_condition(const uart_condition_t *condition
 int uart_v2_score_split(const char *split, uart_sampler_genome_v2_t genome, int frames, int *total);
 uart_sampler_genome_v2_t uart_v2_random_genome(uint16_t *state);
 uart_sampler_genome_v2_t uart_v2_mutate_genome(uint16_t *state, uart_sampler_genome_v2_t parent);
+int uart_v2_landscape_child(
+    const char *kernel,
+    uint16_t *state,
+    uart_sampler_genome_v2_t parent,
+    uart_sampler_genome_v2_t *child
+);
 uart_stream_v2_arm_result_t uart_v2_ga_arm_train_only(int budget, uint16_t seed, int frames);
 uart_stream_v2_arm_result_t uart_v2_restart_hillclimb_arm_train_only(int budget, uint16_t seed, int frames);
 uart_stream_v2_arm_result_t uart_v2_immigrant_hillclimb_arm_train_only(int budget, uint16_t seed, int frames);

@@ -10,6 +10,7 @@ from sim.uart_stream_v2 import (
     decode_genome,
     encode_genome,
     genome_space_size,
+    landscape_child,
     same_boot_ab_search,
     variant_arm_train_only,
     build_run_log_fixture,
@@ -176,6 +177,37 @@ class UartStreamV2HeadroomTest(unittest.TestCase):
                 sum(score.frames for score in holdout.conditions),
             ), variant)
 
+    def test_c_twin_matches_python_v4_landscape_kernels(self):
+        if not V2_C_TWIN.exists():
+            self.skipTest(f"v2 C twin not built: {V2_C_TWIN}")
+        raw = 0x123456789
+        seed = 0x5A5A
+        frames = 4
+        parent = decode_genome(raw)
+        parent_train = score_set("train", parent, frames)
+        for kernel in ("bitflip_1", "bitflip_4", "field_resample", "full_random"):
+            _state, child = landscape_child(kernel, seed, parent)
+            child_train = score_set("train", child, frames)
+            proc = subprocess.run(
+                [str(V2_C_TWIN), "landscape", kernel, hex(raw), hex(seed), str(frames)],
+                cwd=ROOT,
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            fields = proc.stdout.strip().split()
+            self.assertEqual(fields[2], kernel)
+            self.assertEqual(int(fields[4], 16), encode_genome(parent), kernel)
+            self.assertEqual(int(fields[6], 16), encode_genome(child), kernel)
+            self.assertEqual((int(fields[8]), int(fields[9])), (
+                sum(score.passed for score in parent_train.conditions),
+                sum(score.frames for score in parent_train.conditions),
+            ), kernel)
+            self.assertEqual((int(fields[11]), int(fields[12])), (
+                sum(score.passed for score in child_train.conditions),
+                sum(score.frames for score in child_train.conditions),
+            ), kernel)
+
     def test_v3_screening_script_smoke(self):
         if not V2_C_TWIN.exists():
             self.skipTest(f"v2 C twin not built: {V2_C_TWIN}")
@@ -207,6 +239,46 @@ class UartStreamV2HeadroomTest(unittest.TestCase):
         report = json.loads(proc.stdout)
         self.assertEqual(report["budget"], 16)
         self.assertEqual(set(report["variants"].keys()), {"current_hillclimb", "restart_hillclimb_v3"})
+
+    def test_v4_landscape_probe_smoke(self):
+        proc = subprocess.run(
+            [
+                "python3",
+                "host/landscape_v4_probe.py",
+                "--frames",
+                "1",
+                "--parents-per-stratum",
+                "4",
+                "--top-pool-per-seed",
+                "4",
+                "--children-per-parent",
+                "1",
+                "--bootstrap-rounds",
+                "4",
+                "--seeds",
+                "0x1357,0x2468",
+                "--json",
+            ],
+            cwd=ROOT,
+            check=True,
+            text=True,
+            capture_output=True,
+        )
+        report = json.loads(proc.stdout)
+        self.assertEqual(report["protocol"], "prereg_landscape_v4")
+        self.assertEqual(report["frames"], 1)
+        self.assertEqual(set(report["results"].keys()), {
+            "uniform_random",
+            "random_stream_top_decile",
+            "historical_champion",
+        })
+        for by_kernel in report["results"].values():
+            self.assertEqual(set(by_kernel.keys()), {"bitflip_1", "bitflip_4", "field_resample", "full_random"})
+            for stats in by_kernel.values():
+                self.assertEqual(stats["n_pairs"], 4)
+                self.assertIn("hard", stats)
+                self.assertIn("soft", stats)
+                self.assertIn("hard_soft_child_corr", stats)
 
     def test_firmware_fake_backend_matches_python_same_boot_ab_search(self):
         if not V2_FIRMWARE.exists():
