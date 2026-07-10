@@ -369,3 +369,10 @@ valid repeated payloads across pages or cycles and matches the board collection
 methodology learned from the paged-mailbox smoke campaign. Holdout remains
 firewalled: page 6/7 contains train-only progress; page 4/5 final pages are the
 first v2 A/B telemetry that include holdout scores.
+
+The board A/B judgment uses high-resolution final holdout scoring. Search and
+heartbeats still use 4 train frames per condition, but once each arm's champion
+is locked, firmware scores holdout with 256 frames per holdout condition
+(`holdout_total = 1024`). This addresses the board-observed failure mode where
+4-frame holdout (`holdout_total = 16`) quantized GA and random into an apparent
+tie even though GA had already won on train.

@@ -46,6 +46,7 @@ static uart_stream_v2_arm_result_t random_arm(
     int budget,
     uint16_t seed,
     int frames,
+    int holdout_frames,
     int heartbeat_generations,
     autoehw_v2_progress_fn progress_fn,
     void *progress_ctx
@@ -81,7 +82,13 @@ static uart_stream_v2_arm_result_t random_arm(
             progress_fn(progress_ctx, &progress);
         }
     }
-    result.holdout_passed = score_split_with_backend(backend, "holdout", result.best_genome, frames, &result.holdout_total);
+    result.holdout_passed = score_split_with_backend(
+        backend,
+        "holdout",
+        result.best_genome,
+        holdout_frames,
+        &result.holdout_total
+    );
     return result;
 }
 
@@ -90,6 +97,7 @@ static uart_stream_v2_arm_result_t ga_arm(
     int budget,
     uint16_t seed,
     int frames,
+    int holdout_frames,
     int heartbeat_generations,
     autoehw_v2_progress_fn progress_fn,
     void *progress_ctx
@@ -146,7 +154,13 @@ static uart_stream_v2_arm_result_t ga_arm(
             progress_fn(progress_ctx, &progress);
         }
     }
-    result.holdout_passed = score_split_with_backend(backend, "holdout", result.best_genome, frames, &result.holdout_total);
+    result.holdout_passed = score_split_with_backend(
+        backend,
+        "holdout",
+        result.best_genome,
+        holdout_frames,
+        &result.holdout_total
+    );
     return result;
 }
 
@@ -176,15 +190,38 @@ uart_stream_v2_ab_result_t autoehw_v2_firmware_same_boot_ab_monitored(
     autoehw_v2_progress_fn progress_fn,
     void *progress_ctx
 ) {
+    return autoehw_v2_firmware_same_boot_ab_monitored_holdout(
+        backend,
+        budget,
+        seed,
+        frames,
+        frames,
+        heartbeat_generations,
+        progress_fn,
+        progress_ctx
+    );
+}
+
+uart_stream_v2_ab_result_t autoehw_v2_firmware_same_boot_ab_monitored_holdout(
+    const autoehw_v2_backend_t *backend,
+    int budget,
+    uint16_t seed,
+    int train_frames,
+    int holdout_frames,
+    int heartbeat_generations,
+    autoehw_v2_progress_fn progress_fn,
+    void *progress_ctx
+) {
     uart_stream_v2_ab_result_t result = {0};
-    if (backend == 0 || backend->eval_frame == 0 || budget <= 0 || frames <= 0) {
+    if (backend == 0 || backend->eval_frame == 0 || budget <= 0 || train_frames <= 0 || holdout_frames <= 0) {
         return result;
     }
     result.ga = ga_arm(
         backend,
         budget,
         (uint16_t)(seed ^ 0x4A4Au),
-        frames,
+        train_frames,
+        holdout_frames,
         heartbeat_generations,
         progress_fn,
         progress_ctx
@@ -193,7 +230,8 @@ uart_stream_v2_ab_result_t autoehw_v2_firmware_same_boot_ab_monitored(
         backend,
         budget,
         (uint16_t)(seed ^ 0xBEEFu),
-        frames,
+        train_frames,
+        holdout_frames,
         heartbeat_generations,
         progress_fn,
         progress_ctx

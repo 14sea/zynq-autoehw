@@ -49,6 +49,17 @@ uart_stream_v2_ab_result_t autoehw_v2_firmware_same_boot_ab_monitored(
     void *progress_ctx
 );
 
+uart_stream_v2_ab_result_t autoehw_v2_firmware_same_boot_ab_monitored_holdout(
+    const autoehw_v2_backend_t *backend,
+    int budget,
+    uint16_t seed,
+    int train_frames,
+    int holdout_frames,
+    int heartbeat_generations,
+    autoehw_v2_progress_fn progress_fn,
+    void *progress_ctx
+);
+
 int autoehw_v2_fake_eval_frame(
     void *ctx,
     const uart_condition_t *condition,

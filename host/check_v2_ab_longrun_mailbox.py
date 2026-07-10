@@ -22,6 +22,7 @@ from sim.uart_stream_v2 import (  # noqa: E402
 HEX_RE = re.compile(r"(?:0x)?([0-9a-fA-F]{8})")
 BUDGET = 8
 FRAMES = 4
+HOLDOUT_FRAMES = 256
 SEED = 0xC0DE
 HEARTBEAT = 2
 TRAIN_TOTAL = 4 * FRAMES
@@ -119,7 +120,7 @@ def progress_payload(arm_id: int, generation: int, genome, best_passed: int, eva
 def expected_arm_payload(arm_id: int, result) -> tuple[int, ...]:
     raw = encode_genome(result.best_genome)
     train = score_set("train", result.best_genome, FRAMES)
-    holdout = score_set("holdout", result.best_genome, FRAMES)
+    holdout = score_set("holdout", result.best_genome, HOLDOUT_FRAMES)
     train_passed_sum = sum(score.passed for score in train.conditions)
     train_total_sum = sum(score.frames for score in train.conditions)
     holdout_passed = sum(score.passed for score in holdout.conditions)

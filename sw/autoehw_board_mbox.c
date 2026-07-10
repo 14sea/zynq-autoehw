@@ -45,6 +45,7 @@
 #define AUTOEHW_LEGACY_WORD_COUNT 15u
 #define AUTOEHW_V2_AB_BUDGET 16
 #define AUTOEHW_V2_AB_FRAMES 4
+#define AUTOEHW_V2_FINAL_HOLDOUT_FRAMES 256
 #define AUTOEHW_V2_AB_LONGRUN_SMOKE_BUDGET 8
 #define AUTOEHW_V2_AB_LONGRUN_SMOKE_HEARTBEAT 2
 #define AUTOEHW_V2_TRAIN_EVALS_PER_CANDIDATE (4u * AUTOEHW_V2_AB_FRAMES)
@@ -655,11 +656,12 @@ int autoehw_host_run_v2_ab_longrun_smoke(void) {
     }
     ev_count = 0;
 
-    result = autoehw_v2_firmware_same_boot_ab_monitored(
+    result = autoehw_v2_firmware_same_boot_ab_monitored_holdout(
         &backend,
         AUTOEHW_V2_AB_LONGRUN_SMOKE_BUDGET,
         AUTOEHW_BOARD_SEED,
         AUTOEHW_V2_AB_FRAMES,
+        AUTOEHW_V2_FINAL_HOLDOUT_FRAMES,
         AUTOEHW_V2_AB_LONGRUN_SMOKE_HEARTBEAT,
         publish_v2_progress,
         0
@@ -848,11 +850,12 @@ int autoehw_board_main(void) {
             publish(ev[i]);
         }
         start_idx = ev_count;
-        v2_result = autoehw_v2_firmware_same_boot_ab_monitored(
+        v2_result = autoehw_v2_firmware_same_boot_ab_monitored_holdout(
             &v2_backend,
             (int)arm_budget,
             AUTOEHW_BOARD_SEED,
             AUTOEHW_V2_AB_FRAMES,
+            AUTOEHW_V2_FINAL_HOLDOUT_FRAMES,
             (int)heartbeat_generations,
             publish_v2_progress,
             0
