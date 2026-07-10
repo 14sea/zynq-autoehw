@@ -622,3 +622,58 @@ stays as-is (1024-frame final eval, now proven).
   an honest falsification-in-progress of the benchmark's train-signal design,
   exactly what the M0 claim discipline is for. Next benchmark iteration targets
   the train signal.
+
+---
+
+## M1-full v2 A/B with DENSE train signal (2026-07-10) — **still not beats-random: random now wins outright at equal budget**
+
+Rerun of the multi-hour same-boot A/B with the densified train signal
+(commit `9fe5cd8`: 64 train frames per condition → `train_total = 256` per
+candidate; 1024-frame final holdout unchanged; budget/heartbeat/page-8
+auto-rescaled by the v2 speed probe). `dfx_top.bit` md5 `7160715f0cb8…`
+(routed WNS bit-identical to the previous board-verified builds — firmware is
+BRAM-INIT-only). FCLK0 pinned 50 MHz (was 125 again), cadence probe GO
+(median 10.1 s), run start ≈ 10:01, final carousel from ≈ T+7096 s,
+862 logged transitions, **0 stuck alerts / 0 serial errors**.
+
+### Board-derived calibration (page 8, hand-decoded + arithmetic-exact)
+
+- v2 evals/sec measured **1592** (vs 1658 in the plumbing smoke) →
+  arm budget **22,387** candidates = ⌊1592×7200/(2×256)⌋ exact;
+  evals/arm 5,731,072 = 22,387×256 exact; heartbeat 62 candidates ≈ 10 s;
+  probe cost 8,192 evals. Train evals/candidate = **0x100** as designed.
+- v1 legacy 15-word prefix unchanged (v1 eps 31,047 — 30–32 k band).
+- Final carousel = 59 words/cycle; two consecutive cycles captured and
+  **byte-identical**; positional reconstruction (never first-seen dedup).
+
+### Result (both arms bit-exact to the host v2 oracle — genome, train AND 1024-frame holdout; C-twin replay 130 s)
+
+| arm | genome | train | train % | holdout | holdout % |
+|---|---|---|---|---|---|
+| GA | `0x60894268a2` | 33/256 | 12.9 % | 62/1024 | 6.05 % |
+| random | `0x6a8ba845d4` | **42/256** | **16.4 %** | **87/1024** | **8.50 %** |
+
+Δ(holdout) = 25/1024, σ ≈ 11.7 → **z ≈ 2.1: random beats GA**, on train *and*
+holdout.
+
+### Diagnosis — the dense train signal worked; the GA search is now the limiter
+
+The overfit failure mode is gone: train ranking now *transfers* to holdout
+(random higher on both; per-arm train% ≈ 2× holdout% consistently, no more
+memorize-16-frames cliff). What the honest signal reveals is that at this
+budget regime (22 k candidates/arm — 16× fewer than the 4-frame runs, since
+eval cost went 16×) the GA underperforms best-of-stream random search on a
+39-bit space. Candidate hypotheses for the next iteration: premature
+convergence (population/mutation params were tuned in the cheap-eval,
+373 k-candidate regime), missing diversity maintenance/restarts, or simply
+that random best-of-22k is a strong baseline when fitness is low-noise.
+
+### Standing
+
+- ✅ Runtime claims all hold again: autonomous ~125 min, PC-free, calibrated
+  budget derived on-board, 10 s telemetry, bit-exact replay.
+- ✅ Train-signal fix validated: train→holdout transfer restored (the previous
+  run's failure mode is decidably repaired).
+- ❌ Beats-random: **decidably not — inverted.** Random > GA at z ≈ 2.1.
+  The benchmark's fitness signal is no longer the suspect; the *search*
+  (GA hyperparameters/structure for the expensive-eval regime) is.
