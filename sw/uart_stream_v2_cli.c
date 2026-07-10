@@ -68,6 +68,31 @@ int main(int argc, char **argv) {
         return 0;
     }
 
+    if (argc >= 2 && strcmp(argv[1], "graded") == 0) {
+        if (argc != 4) {
+            fprintf(stderr, "usage: %s graded <raw_genome> <frames>\n", argv[0]);
+            return 2;
+        }
+        uart_sampler_genome_v2_t genome = uart_v2_decode_genome(parse_u64(argv[2], "raw_genome"));
+        int frames = (int)parse_long(argv[3], "frames");
+        for (int idx = 0; idx < uart_v2_condition_count(); idx++) {
+            const uart_condition_t *condition = uart_v2_condition_at(idx);
+            uart_condition_score_t hard = uart_v2_score_condition(condition, genome, frames);
+            int graded_total = 0;
+            int graded = uart_v2_graded_score_condition(condition, genome, frames, &graded_total);
+            printf(
+                "%s %s hard %d %d graded %d %d\n",
+                hard.condition,
+                hard.split,
+                hard.passed,
+                hard.frames,
+                graded,
+                graded_total
+            );
+        }
+        return 0;
+    }
+
     if (argc >= 2 && strcmp(argv[1], "ab") == 0) {
         if (argc != 5) {
             fprintf(stderr, "usage: %s ab <budget> <seed> <frames>\n", argv[0]);
@@ -140,7 +165,7 @@ int main(int argc, char **argv) {
 
     fprintf(
         stderr,
-        "usage: %s score <raw_genome> <frames> | ab <budget> <seed> <frames> | variant <variant> <budget> <seed> <train_frames> <holdout_frames> | landscape <kernel> <parent_raw> <seed> <frames>\n",
+        "usage: %s score <raw_genome> <frames> | graded <raw_genome> <frames> | ab <budget> <seed> <frames> | variant <variant> <budget> <seed> <train_frames> <holdout_frames> | landscape <kernel> <parent_raw> <seed> <frames>\n",
         argv[0]
     );
     return 2;

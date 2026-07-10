@@ -36,6 +36,8 @@ uart_sampler_genome_v2_t uart_v2_decode_genome(uint64_t word);
 uart_sampler_config_t uart_v2_effective_config(const uart_condition_t *condition, uart_sampler_genome_v2_t genome);
 uart_condition_score_t uart_v2_score_condition(const uart_condition_t *condition, uart_sampler_genome_v2_t genome, int frames);
 int uart_v2_score_split(const char *split, uart_sampler_genome_v2_t genome, int frames, int *total);
+int uart_v2_graded_score_condition(const uart_condition_t *condition, uart_sampler_genome_v2_t genome, int frames, int *total);
+int uart_v2_graded_score_split(const char *split, uart_sampler_genome_v2_t genome, int frames, int *total);
 uart_sampler_genome_v2_t uart_v2_random_genome(uint16_t *state);
 uart_sampler_genome_v2_t uart_v2_mutate_genome(uint16_t *state, uart_sampler_genome_v2_t parent);
 int uart_v2_landscape_child(

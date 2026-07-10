@@ -16,6 +16,9 @@ from sim.uart_stream_v1 import (
     ConditionScore,
     SamplerConfig,
     SetScore,
+    _payload,
+    _vote_bit,
+    crc8,
     frame_passes,
     lfsr16_step,
     round_nearest_away_from_zero,
@@ -263,6 +266,34 @@ def score_set(split: str, genome: SamplerGenomeV2, frames: int = DEFAULT_FRAMES)
 
 def train_passed(genome: SamplerGenomeV2, frames: int = DEFAULT_FRAMES) -> int:
     return sum(score.passed for score in score_set("train", genome, frames).conditions)
+
+
+def frame_bit_matches(condition: Condition, genome: SamplerGenomeV2, frame_idx: int) -> int:
+    config = effective_config(condition, genome)
+    payload = _payload(condition, frame_idx)
+    sent = payload + [crc8(payload)]
+    state = (condition.lfsr_seed ^ 0xC0DE ^ (frame_idx * 0x1021)) & 0xFFFF
+    matches = 0
+
+    for byte in sent:
+        decoded = 0
+        for bit_idx in range(8):
+            state, bit = _vote_bit((byte >> bit_idx) & 1, condition, config, state)
+            decoded |= bit << bit_idx
+        matches += 8 - ((decoded ^ byte) & 0xFF).bit_count()
+    return matches
+
+
+def graded_score_condition(condition: Condition, genome: SamplerGenomeV2, frames: int = DEFAULT_FRAMES) -> int:
+    return sum(frame_bit_matches(condition, genome, frame_idx) for frame_idx in range(frames))
+
+
+def graded_score_split(split: str, genome: SamplerGenomeV2, frames: int = DEFAULT_FRAMES) -> int:
+    return sum(graded_score_condition(condition, genome, frames) for condition in conditions_for(split))
+
+
+def graded_score_split_total(split: str, frames: int = DEFAULT_FRAMES) -> int:
+    return sum((condition.packet_len + 1) * 8 * frames for condition in conditions_for(split))
 
 
 def random_arm_train_only(budget: int, seed: int, frames: int = DEFAULT_FRAMES) -> ArmResult:

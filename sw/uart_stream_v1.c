@@ -166,6 +166,37 @@ int uart_frame_passes(const uart_condition_t *condition, uart_sampler_config_t c
     return uart_crc8(decoded, condition->packet_len) == decoded[condition->packet_len];
 }
 
+int uart_frame_bit_matches(const uart_condition_t *condition, uart_sampler_config_t config, int frame_idx) {
+    uint8_t payload[64];
+    uint16_t state;
+    int matches = 0;
+
+    if (condition == NULL || condition->packet_len < 1 || condition->packet_len > 64) {
+        return 0;
+    }
+
+    payload_for(condition, frame_idx, payload);
+    uint8_t sent_crc = uart_crc8(payload, condition->packet_len);
+    state = (uint16_t)(condition->lfsr_seed ^ 0xC0DEu ^ (uint16_t)(frame_idx * 0x1021));
+
+    for (int byte_idx = 0; byte_idx < condition->packet_len + 1; byte_idx++) {
+        uint8_t source = (byte_idx == condition->packet_len) ? sent_crc : payload[byte_idx];
+        uint8_t decoded = 0;
+        uint8_t diff;
+
+        for (int bit_idx = 0; bit_idx < 8; bit_idx++) {
+            int decoded_bit = vote_bit((source >> bit_idx) & 1, condition, config, &state);
+            decoded = (uint8_t)(decoded | (uint8_t)(decoded_bit << bit_idx));
+        }
+        diff = (uint8_t)(decoded ^ source);
+        for (int bit_idx = 0; bit_idx < 8; bit_idx++) {
+            matches += ((diff >> bit_idx) & 1u) ? 0 : 1;
+        }
+    }
+
+    return matches;
+}
+
 uart_condition_score_t uart_score_condition(const uart_condition_t *condition, uart_sampler_config_t config, int frames) {
     uart_condition_score_t score = {condition ? condition->name : "", condition ? condition->split : "", 0, frames};
     if (condition == NULL || frames <= 0) {

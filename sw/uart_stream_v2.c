@@ -210,6 +210,45 @@ int uart_v2_score_split(const char *split, uart_sampler_genome_v2_t genome, int 
     return passed;
 }
 
+int uart_v2_graded_score_condition(const uart_condition_t *condition, uart_sampler_genome_v2_t genome, int frames, int *total) {
+    int score = 0;
+    int local_total = 0;
+
+    if (condition == NULL || frames <= 0) {
+        if (total != NULL) {
+            *total = 0;
+        }
+        return 0;
+    }
+
+    uart_sampler_config_t config = uart_v2_effective_config(condition, genome);
+    local_total = (condition->packet_len + 1) * 8 * frames;
+    for (int frame_idx = 0; frame_idx < frames; frame_idx++) {
+        score += uart_frame_bit_matches(condition, config, frame_idx);
+    }
+    if (total != NULL) {
+        *total = local_total;
+    }
+    return score;
+}
+
+int uart_v2_graded_score_split(const char *split, uart_sampler_genome_v2_t genome, int frames, int *total) {
+    int score = 0;
+    int local_total = 0;
+    for (int idx = 0; idx < uart_v2_condition_count(); idx++) {
+        const uart_condition_t *condition = uart_v2_condition_at(idx);
+        if (strcmp(condition->split, split) == 0) {
+            int condition_total = 0;
+            score += uart_v2_graded_score_condition(condition, genome, frames, &condition_total);
+            local_total += condition_total;
+        }
+    }
+    if (total != NULL) {
+        *total = local_total;
+    }
+    return score;
+}
+
 uart_sampler_genome_v2_t uart_v2_random_genome(uint16_t *state) {
     uint64_t word0 = rand32(state);
     uint64_t word1 = rand16(state);

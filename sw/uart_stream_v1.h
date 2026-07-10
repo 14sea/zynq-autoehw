@@ -34,7 +34,7 @@ uint8_t uart_crc8(const uint8_t *data, int len);
 int uart_condition_count(void);
 const uart_condition_t *uart_condition_at(int idx);
 int uart_frame_passes(const uart_condition_t *condition, uart_sampler_config_t config, int frame_idx);
+int uart_frame_bit_matches(const uart_condition_t *condition, uart_sampler_config_t config, int frame_idx);
 uart_condition_score_t uart_score_condition(const uart_condition_t *condition, uart_sampler_config_t config, int frames);
 
 #endif
-

@@ -14,7 +14,11 @@ from sim.uart_stream_v2 import (
     same_boot_ab_search,
     variant_arm_train_only,
     build_run_log_fixture,
+    graded_score_condition,
+    graded_score_split,
+    graded_score_split_total,
     score_set,
+    conditions_for,
 )
 
 
@@ -97,6 +101,57 @@ class UartStreamV2HeadroomTest(unittest.TestCase):
             for score in score_set(split, genome, frames).conditions:
                 expected.append((score.condition, score.split, score.passed, score.frames))
         self.assertEqual(observed, expected)
+
+    def test_c_twin_matches_python_graded_score_rows(self):
+        if not V2_C_TWIN.exists():
+            self.skipTest(f"v2 C twin not built: {V2_C_TWIN}")
+        raw = 0x60894268A2
+        genome = decode_genome(raw)
+        frames = 3
+        proc = subprocess.run(
+            [str(V2_C_TWIN), "graded", hex(raw), str(frames)],
+            cwd=ROOT,
+            check=True,
+            text=True,
+            capture_output=True,
+        )
+        observed = []
+        for line in proc.stdout.strip().splitlines():
+            fields = line.split()
+            observed.append((
+                fields[0],
+                fields[1],
+                int(fields[3]),
+                int(fields[4]),
+                int(fields[6]),
+                int(fields[7]),
+            ))
+        expected = []
+        for split in ("train", "holdout", "adversarial"):
+            for condition in conditions_for(split):
+                hard = score_set(split, genome, frames)
+                hard_by_condition = {score.condition: score for score in hard.conditions}
+                expected.append((
+                    condition.name,
+                    condition.split,
+                    hard_by_condition[condition.name].passed,
+                    frames,
+                    graded_score_condition(condition, genome, frames),
+                    (condition.packet_len + 1) * 8 * frames,
+                ))
+        self.assertEqual(observed, expected)
+
+    def test_graded_split_score_bounds(self):
+        raw = 0x6A8BA845D4
+        genome = decode_genome(raw)
+        frames = 4
+        for split in ("train", "holdout"):
+            graded = graded_score_split(split, genome, frames)
+            total = graded_score_split_total(split, frames)
+            hard_passed = sum(score.passed for score in score_set(split, genome, frames).conditions)
+            self.assertGreaterEqual(graded, 0)
+            self.assertLessEqual(graded, total)
+            self.assertGreaterEqual(total, hard_passed * 8)
 
     def test_c_twin_matches_python_same_boot_ab_search(self):
         if not V2_C_TWIN.exists():
@@ -498,6 +553,34 @@ class UartStreamV2HeadroomTest(unittest.TestCase):
         for row in report["variants"]["pbil_island4_deep_v7"]["rows"]:
             self.assertEqual(row["variant_budget"], 224)
             self.assertEqual(row["random_budget"], 240)
+
+    def test_graded_smoke_script_writes_fixture(self):
+        out = ROOT / "build" / "host" / "graded_smoke_fixture.json"
+        proc = subprocess.run(
+            [
+                "python3",
+                "host/run_graded_smoke.py",
+                "--frames",
+                "2",
+                "--random-count",
+                "1",
+                "--out",
+                str(out),
+            ],
+            cwd=ROOT,
+            check=True,
+            text=True,
+            capture_output=True,
+        )
+        self.assertIn("wrote=", proc.stdout)
+        fixture = json.loads(out.read_text())
+        self.assertEqual(fixture["protocol"], "graded_fitness_v1_smoke")
+        self.assertEqual(fixture["frames_per_condition"], 2)
+        self.assertGreaterEqual(len(fixture["rows"]), 2)
+        for row in fixture["rows"]:
+            self.assertIn("hard_passed", row)
+            self.assertIn("graded_score", row)
+            self.assertLessEqual(row["graded_score"], row["graded_total"])
 
     def test_v4_landscape_probe_smoke(self):
         proc = subprocess.run(
