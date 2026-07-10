@@ -177,6 +177,35 @@ class UartStreamV2HeadroomTest(unittest.TestCase):
                 sum(score.frames for score in holdout.conditions),
             ), variant)
 
+    def test_c_twin_matches_python_v4_search_variants(self):
+        if not V2_C_TWIN.exists():
+            self.skipTest(f"v2 C twin not built: {V2_C_TWIN}")
+        budget = 196
+        train_frames = 2
+        holdout_frames = 4
+        seed = 0x1357
+        for variant in ("bitflip1_topdecile_v4", "pbil_eda_v4"):
+            result = variant_arm_train_only(variant, budget, seed, train_frames)
+            train = score_set("train", result.best_genome, train_frames)
+            holdout = score_set("holdout", result.best_genome, holdout_frames)
+            proc = subprocess.run(
+                [str(V2_C_TWIN), "variant", variant, str(budget), hex(seed), str(train_frames), str(holdout_frames)],
+                cwd=ROOT,
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            fields = proc.stdout.strip().split()
+            self.assertEqual(int(fields[2], 16), encode_genome(result.best_genome), variant)
+            self.assertEqual((int(fields[12]), int(fields[13])), (
+                sum(score.passed for score in train.conditions),
+                sum(score.frames for score in train.conditions),
+            ), variant)
+            self.assertEqual((int(fields[15]), int(fields[16])), (
+                sum(score.passed for score in holdout.conditions),
+                sum(score.frames for score in holdout.conditions),
+            ), variant)
+
     def test_c_twin_matches_python_v4_landscape_kernels(self):
         if not V2_C_TWIN.exists():
             self.skipTest(f"v2 C twin not built: {V2_C_TWIN}")
@@ -239,6 +268,39 @@ class UartStreamV2HeadroomTest(unittest.TestCase):
         report = json.loads(proc.stdout)
         self.assertEqual(report["budget"], 16)
         self.assertEqual(set(report["variants"].keys()), {"current_hillclimb", "restart_hillclimb_v3"})
+
+    def test_v4_screening_script_smoke(self):
+        if not V2_C_TWIN.exists():
+            self.skipTest(f"v2 C twin not built: {V2_C_TWIN}")
+        proc = subprocess.run(
+            [
+                "python3",
+                "host/screen_v4_search.py",
+                "--cli",
+                str(V2_C_TWIN),
+                "--budget",
+                "40",
+                "--train-frames",
+                "2",
+                "--holdout-frames",
+                "4",
+                "--seeds",
+                "0x1357,0x2468",
+                "--variants",
+                "bitflip1_topdecile_v4,pbil_eda_v4",
+                "--jobs",
+                "2",
+                "--json",
+            ],
+            cwd=ROOT,
+            check=True,
+            text=True,
+            capture_output=True,
+        )
+        report = json.loads(proc.stdout)
+        self.assertEqual(report["protocol"], "prereg_search_v4")
+        self.assertEqual(report["budget"], 40)
+        self.assertEqual(set(report["variants"].keys()), {"bitflip1_topdecile_v4", "pbil_eda_v4"})
 
     def test_v4_landscape_probe_smoke(self):
         proc = subprocess.run(

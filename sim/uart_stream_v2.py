@@ -29,6 +29,16 @@ GENOME_BITS = 39
 DEFAULT_FRAMES = 8
 MAJORITY_OPTIONS = (1, 3, 5, 5)
 EDGE_UNC_SCORE = {"low": 2, "med": 5, "high": 8}
+V4_INIT_POOL = 160
+V4_INIT_ELITES = 16
+V4_PBIL_BATCH = 32
+V4_PBIL_ELITES = 4
+V4_PBIL_Q15 = 32768
+V4_PBIL_MIN_Q15 = 2048
+V4_PBIL_MAX_Q15 = 30720
+V4_PBIL_HALF_Q15 = V4_PBIL_Q15 // 2
+V4_PBIL_LEARNING_SHIFT = 3
+V4_PBIL_MUTATION_SHIFT = 6
 
 
 @dataclass(frozen=True)
@@ -238,6 +248,10 @@ def score_set(split: str, genome: SamplerGenomeV2, frames: int = DEFAULT_FRAMES)
     return SetScore(split, tuple(score_condition(condition, genome, frames) for condition in conditions_for(split)))
 
 
+def train_passed(genome: SamplerGenomeV2, frames: int = DEFAULT_FRAMES) -> int:
+    return sum(score.passed for score in score_set("train", genome, frames).conditions)
+
+
 def random_arm_train_only(budget: int, seed: int, frames: int = DEFAULT_FRAMES) -> ArmResult:
     if budget <= 0:
         raise ValueError("budget must be positive")
@@ -393,6 +407,116 @@ def beam4_ga_arm_train_only(budget: int, seed: int, frames: int = DEFAULT_FRAMES
     return ArmResult("beam4_ga_v3", best_genome, best_passed / total, tuple())
 
 
+def _sorted_scored(scored: list[tuple[int, int, SamplerGenomeV2]]) -> list[tuple[int, int, SamplerGenomeV2]]:
+    return sorted(scored, key=lambda item: (-item[0], item[1]))
+
+
+def _v4_initial_pool(
+    state: int,
+    budget: int,
+    frames: int,
+) -> tuple[int, int, SamplerGenomeV2, int, list[tuple[int, int, SamplerGenomeV2]]]:
+    pool_count = min(V4_INIT_POOL, budget)
+    scored: list[tuple[int, int, SamplerGenomeV2]] = []
+    best_genome = STATIC_BASELINE
+    best_passed = -1
+    for order in range(pool_count):
+        state, genome = random_genome(state)
+        passed = train_passed(genome, frames)
+        scored.append((passed, order, genome))
+        if passed > best_passed:
+            best_genome = genome
+            best_passed = passed
+    return state, pool_count, best_genome, best_passed, _sorted_scored(scored)
+
+
+def bitflip1_topdecile_v4_arm_train_only(budget: int, seed: int, frames: int = DEFAULT_FRAMES) -> ArmResult:
+    if budget <= 0:
+        raise ValueError("budget must be positive")
+    state = seed & 0xFFFF
+    total = len(conditions_for("train")) * frames
+    state, used, best_genome, best_passed, _scored = _v4_initial_pool(state, budget, frames)
+
+    for _gen in range(used, budget):
+        state, candidate = landscape_child("bitflip_1", state, best_genome)
+        passed = train_passed(candidate, frames)
+        if passed >= best_passed:
+            best_genome = candidate
+            best_passed = passed
+
+    return ArmResult("bitflip1_topdecile_v4", best_genome, best_passed / total, tuple())
+
+
+def _q15_step_toward(value: int, target: int, shift: int) -> int:
+    if target >= value:
+        return value + ((target - value) >> shift)
+    return value - ((value - target) >> shift)
+
+
+def _clamp_q15(value: int) -> int:
+    return max(V4_PBIL_MIN_Q15, min(V4_PBIL_MAX_Q15, value))
+
+
+def _pbil_probabilities_from_elites(scored: list[tuple[int, int, SamplerGenomeV2]]) -> list[int]:
+    elites = scored[:min(V4_INIT_ELITES, len(scored))]
+    if not elites:
+        return [V4_PBIL_HALF_Q15] * GENOME_BITS
+    probs: list[int] = []
+    for bit in range(GENOME_BITS):
+        ones = sum(1 for _passed, _order, genome in elites if encode_genome(genome) & (1 << bit))
+        probs.append(_clamp_q15((ones * V4_PBIL_Q15 + (len(elites) // 2)) // len(elites)))
+    return probs
+
+
+def _pbil_sample(state: int, probabilities: list[int]) -> tuple[int, SamplerGenomeV2]:
+    raw = 0
+    for bit, probability in enumerate(probabilities):
+        state, rnd = _rand16(state)
+        if (rnd & 0x7FFF) < probability:
+            raw |= 1 << bit
+    return state, decode_genome(raw)
+
+
+def _pbil_update(probabilities: list[int], batch: list[tuple[int, int, SamplerGenomeV2]]) -> list[int]:
+    elites = _sorted_scored(batch)[:min(V4_PBIL_ELITES, len(batch))]
+    if not elites:
+        return probabilities
+    updated: list[int] = []
+    for bit, probability in enumerate(probabilities):
+        ones = sum(1 for _passed, _order, genome in elites if encode_genome(genome) & (1 << bit))
+        target = (ones * V4_PBIL_Q15 + (len(elites) // 2)) // len(elites)
+        value = _q15_step_toward(probability, target, V4_PBIL_LEARNING_SHIFT)
+        value = _q15_step_toward(value, V4_PBIL_HALF_Q15, V4_PBIL_MUTATION_SHIFT)
+        updated.append(_clamp_q15(value))
+    return updated
+
+
+def pbil_eda_v4_arm_train_only(budget: int, seed: int, frames: int = DEFAULT_FRAMES) -> ArmResult:
+    if budget <= 0:
+        raise ValueError("budget must be positive")
+    state = seed & 0xFFFF
+    total = len(conditions_for("train")) * frames
+    state, used, best_genome, best_passed, scored = _v4_initial_pool(state, budget, frames)
+    probabilities = _pbil_probabilities_from_elites(scored)
+    order = used
+
+    while used < budget:
+        batch_count = min(V4_PBIL_BATCH, budget - used)
+        batch: list[tuple[int, int, SamplerGenomeV2]] = []
+        for _idx in range(batch_count):
+            state, genome = _pbil_sample(state, probabilities)
+            passed = train_passed(genome, frames)
+            batch.append((passed, order, genome))
+            if passed > best_passed:
+                best_genome = genome
+                best_passed = passed
+            order += 1
+            used += 1
+        probabilities = _pbil_update(probabilities, batch)
+
+    return ArmResult("pbil_eda_v4", best_genome, best_passed / total, tuple())
+
+
 def variant_arm_train_only(variant: str, budget: int, seed: int, frames: int = DEFAULT_FRAMES) -> ArmResult:
     if variant == "current_hillclimb":
         result = ga_arm_train_only(budget, seed, frames)
@@ -403,6 +527,10 @@ def variant_arm_train_only(variant: str, budget: int, seed: int, frames: int = D
         return immigrant_hillclimb_arm_train_only(budget, seed, frames)
     if variant == "beam4_ga_v3":
         return beam4_ga_arm_train_only(budget, seed, frames)
+    if variant == "bitflip1_topdecile_v4":
+        return bitflip1_topdecile_v4_arm_train_only(budget, seed, frames)
+    if variant == "pbil_eda_v4":
+        return pbil_eda_v4_arm_train_only(budget, seed, frames)
     if variant == "random":
         result = random_arm_train_only(budget, seed, frames)
         return ArmResult(variant, result.best_genome, result.best_fitness_train, result.generations)
