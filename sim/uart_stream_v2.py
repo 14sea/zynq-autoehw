@@ -39,6 +39,15 @@ V4_PBIL_MAX_Q15 = 30720
 V4_PBIL_HALF_Q15 = V4_PBIL_Q15 // 2
 V4_PBIL_LEARNING_SHIFT = 3
 V4_PBIL_MUTATION_SHIFT = 6
+V5_PBIL_BATCH = 64
+V5_PBIL_SAMPLE_COUNT = 60
+V5_PBIL_REFINEMENTS = 4
+V5_PBIL_ELITES = 8
+V5_PBIL_MIN_Q15 = 4096
+V5_PBIL_MAX_Q15 = 28672
+V5_PBIL_LEARNING_SHIFT = 4
+V5_PBIL_MUTATION_SHIFT = 5
+V5_PBIL_RESTART_CHECKPOINT = 2048
 
 
 @dataclass(frozen=True)
@@ -453,18 +462,24 @@ def _q15_step_toward(value: int, target: int, shift: int) -> int:
     return value - ((value - target) >> shift)
 
 
-def _clamp_q15(value: int) -> int:
-    return max(V4_PBIL_MIN_Q15, min(V4_PBIL_MAX_Q15, value))
+def _clamp_q15(value: int, min_q15: int = V4_PBIL_MIN_Q15, max_q15: int = V4_PBIL_MAX_Q15) -> int:
+    return max(min_q15, min(max_q15, value))
 
 
-def _pbil_probabilities_from_elites(scored: list[tuple[int, int, SamplerGenomeV2]]) -> list[int]:
+def _pbil_probabilities_from_elites(
+    scored: list[tuple[int, int, SamplerGenomeV2]],
+    elite_count: int = V4_INIT_ELITES,
+    min_q15: int = V4_PBIL_MIN_Q15,
+    max_q15: int = V4_PBIL_MAX_Q15,
+) -> list[int]:
     elites = scored[:min(V4_INIT_ELITES, len(scored))]
     if not elites:
         return [V4_PBIL_HALF_Q15] * GENOME_BITS
     probs: list[int] = []
+    elites = scored[:min(elite_count, len(scored))]
     for bit in range(GENOME_BITS):
         ones = sum(1 for _passed, _order, genome in elites if encode_genome(genome) & (1 << bit))
-        probs.append(_clamp_q15((ones * V4_PBIL_Q15 + (len(elites) // 2)) // len(elites)))
+        probs.append(_clamp_q15((ones * V4_PBIL_Q15 + (len(elites) // 2)) // len(elites), min_q15, max_q15))
     return probs
 
 
@@ -477,33 +492,58 @@ def _pbil_sample(state: int, probabilities: list[int]) -> tuple[int, SamplerGeno
     return state, decode_genome(raw)
 
 
-def _pbil_update(probabilities: list[int], batch: list[tuple[int, int, SamplerGenomeV2]]) -> list[int]:
-    elites = _sorted_scored(batch)[:min(V4_PBIL_ELITES, len(batch))]
+def _pbil_update(
+    probabilities: list[int],
+    batch: list[tuple[int, int, SamplerGenomeV2]],
+    elite_count: int = V4_PBIL_ELITES,
+    learning_shift: int = V4_PBIL_LEARNING_SHIFT,
+    mutation_shift: int = V4_PBIL_MUTATION_SHIFT,
+    min_q15: int = V4_PBIL_MIN_Q15,
+    max_q15: int = V4_PBIL_MAX_Q15,
+) -> list[int]:
+    elites = _sorted_scored(batch)[:min(elite_count, len(batch))]
     if not elites:
         return probabilities
     updated: list[int] = []
     for bit, probability in enumerate(probabilities):
         ones = sum(1 for _passed, _order, genome in elites if encode_genome(genome) & (1 << bit))
         target = (ones * V4_PBIL_Q15 + (len(elites) // 2)) // len(elites)
-        value = _q15_step_toward(probability, target, V4_PBIL_LEARNING_SHIFT)
-        value = _q15_step_toward(value, V4_PBIL_HALF_Q15, V4_PBIL_MUTATION_SHIFT)
-        updated.append(_clamp_q15(value))
+        value = _q15_step_toward(probability, target, learning_shift)
+        value = _q15_step_toward(value, V4_PBIL_HALF_Q15, mutation_shift)
+        updated.append(_clamp_q15(value, min_q15, max_q15))
     return updated
 
 
-def pbil_eda_v4_arm_train_only(budget: int, seed: int, frames: int = DEFAULT_FRAMES) -> ArmResult:
+def _pbil_arm_train_only(
+    arm: str,
+    budget: int,
+    seed: int,
+    frames: int,
+    batch_size: int,
+    sample_count: int,
+    refinement_count: int,
+    elite_count: int,
+    learning_shift: int,
+    mutation_shift: int,
+    min_q15: int,
+    max_q15: int,
+    restart_checkpoint: int = 0,
+) -> ArmResult:
     if budget <= 0:
         raise ValueError("budget must be positive")
     state = seed & 0xFFFF
     total = len(conditions_for("train")) * frames
     state, used, best_genome, best_passed, scored = _v4_initial_pool(state, budget, frames)
-    probabilities = _pbil_probabilities_from_elites(scored)
+    probabilities = _pbil_probabilities_from_elites(scored, V4_INIT_ELITES, min_q15, max_q15)
     order = used
+    checkpoint_best = best_passed
+    since_checkpoint = 0
 
     while used < budget:
-        batch_count = min(V4_PBIL_BATCH, budget - used)
+        batch_count = min(batch_size, budget - used)
+        pbil_count = min(sample_count, batch_count)
         batch: list[tuple[int, int, SamplerGenomeV2]] = []
-        for _idx in range(batch_count):
+        for _idx in range(pbil_count):
             state, genome = _pbil_sample(state, probabilities)
             passed = train_passed(genome, frames)
             batch.append((passed, order, genome))
@@ -512,9 +552,98 @@ def pbil_eda_v4_arm_train_only(budget: int, seed: int, frames: int = DEFAULT_FRA
                 best_passed = passed
             order += 1
             used += 1
-        probabilities = _pbil_update(probabilities, batch)
+            since_checkpoint += 1
+        probabilities = _pbil_update(batch=batch, probabilities=probabilities, elite_count=elite_count,
+                                     learning_shift=learning_shift, mutation_shift=mutation_shift,
+                                     min_q15=min_q15, max_q15=max_q15)
 
-    return ArmResult("pbil_eda_v4", best_genome, best_passed / total, tuple())
+        refinements = min(refinement_count, budget - used)
+        for _idx in range(refinements):
+            state, genome = landscape_child("bitflip_1", state, best_genome)
+            passed = train_passed(genome, frames)
+            if passed >= best_passed:
+                best_genome = genome
+                best_passed = passed
+            order += 1
+            used += 1
+            since_checkpoint += 1
+
+        if restart_checkpoint > 0 and since_checkpoint >= restart_checkpoint:
+            if best_passed <= checkpoint_best:
+                probabilities = [V4_PBIL_HALF_Q15] * GENOME_BITS
+            checkpoint_best = best_passed
+            since_checkpoint = 0
+
+    return ArmResult(arm, best_genome, best_passed / total, tuple())
+
+
+def pbil_eda_v4_arm_train_only(budget: int, seed: int, frames: int = DEFAULT_FRAMES) -> ArmResult:
+    return _pbil_arm_train_only(
+        "pbil_eda_v4",
+        budget,
+        seed,
+        frames,
+        V4_PBIL_BATCH,
+        V4_PBIL_BATCH,
+        0,
+        V4_PBIL_ELITES,
+        V4_PBIL_LEARNING_SHIFT,
+        V4_PBIL_MUTATION_SHIFT,
+        V4_PBIL_MIN_Q15,
+        V4_PBIL_MAX_Q15,
+    )
+
+
+def pbil_stable_v5_arm_train_only(budget: int, seed: int, frames: int = DEFAULT_FRAMES) -> ArmResult:
+    return _pbil_arm_train_only(
+        "pbil_stable_v5",
+        budget,
+        seed,
+        frames,
+        V5_PBIL_BATCH,
+        V5_PBIL_BATCH,
+        0,
+        V5_PBIL_ELITES,
+        V5_PBIL_LEARNING_SHIFT,
+        V5_PBIL_MUTATION_SHIFT,
+        V5_PBIL_MIN_Q15,
+        V5_PBIL_MAX_Q15,
+    )
+
+
+def pbil_restart_v5_arm_train_only(budget: int, seed: int, frames: int = DEFAULT_FRAMES) -> ArmResult:
+    return _pbil_arm_train_only(
+        "pbil_restart_v5",
+        budget,
+        seed,
+        frames,
+        V5_PBIL_BATCH,
+        V5_PBIL_BATCH,
+        0,
+        V5_PBIL_ELITES,
+        V5_PBIL_LEARNING_SHIFT,
+        V5_PBIL_MUTATION_SHIFT,
+        V5_PBIL_MIN_Q15,
+        V5_PBIL_MAX_Q15,
+        V5_PBIL_RESTART_CHECKPOINT,
+    )
+
+
+def pbil_hybrid_v5_arm_train_only(budget: int, seed: int, frames: int = DEFAULT_FRAMES) -> ArmResult:
+    return _pbil_arm_train_only(
+        "pbil_hybrid_v5",
+        budget,
+        seed,
+        frames,
+        V5_PBIL_BATCH,
+        V5_PBIL_SAMPLE_COUNT,
+        V5_PBIL_REFINEMENTS,
+        V5_PBIL_ELITES,
+        V5_PBIL_LEARNING_SHIFT,
+        V5_PBIL_MUTATION_SHIFT,
+        V5_PBIL_MIN_Q15,
+        V5_PBIL_MAX_Q15,
+    )
 
 
 def variant_arm_train_only(variant: str, budget: int, seed: int, frames: int = DEFAULT_FRAMES) -> ArmResult:
@@ -531,6 +660,12 @@ def variant_arm_train_only(variant: str, budget: int, seed: int, frames: int = D
         return bitflip1_topdecile_v4_arm_train_only(budget, seed, frames)
     if variant == "pbil_eda_v4":
         return pbil_eda_v4_arm_train_only(budget, seed, frames)
+    if variant == "pbil_stable_v5":
+        return pbil_stable_v5_arm_train_only(budget, seed, frames)
+    if variant == "pbil_restart_v5":
+        return pbil_restart_v5_arm_train_only(budget, seed, frames)
+    if variant == "pbil_hybrid_v5":
+        return pbil_hybrid_v5_arm_train_only(budget, seed, frames)
     if variant == "random":
         result = random_arm_train_only(budget, seed, frames)
         return ArmResult(variant, result.best_genome, result.best_fitness_train, result.generations)

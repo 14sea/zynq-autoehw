@@ -33,6 +33,15 @@ enum {
     V4_PBIL_HALF_Q15 = 16384,
     V4_PBIL_LEARNING_SHIFT = 3,
     V4_PBIL_MUTATION_SHIFT = 6,
+    V5_PBIL_BATCH = 64,
+    V5_PBIL_SAMPLE_COUNT = 60,
+    V5_PBIL_REFINEMENTS = 4,
+    V5_PBIL_ELITES = 8,
+    V5_PBIL_MIN_Q15 = 4096,
+    V5_PBIL_MAX_Q15 = 28672,
+    V5_PBIL_LEARNING_SHIFT = 4,
+    V5_PBIL_MUTATION_SHIFT = 5,
+    V5_PBIL_RESTART_CHECKPOINT = 2048,
 };
 
 typedef struct {
@@ -315,12 +324,19 @@ static int q15_step_toward(int value, int target, int shift) {
     return value - ((value - target) >> shift);
 }
 
-static int clamp_q15(int value) {
-    return clamp_int(value, V4_PBIL_MIN_Q15, V4_PBIL_MAX_Q15);
+static int clamp_q15(int value, int min_q15, int max_q15) {
+    return clamp_int(value, min_q15, max_q15);
 }
 
-static void pbil_probabilities_from_elites(const scored_genome_t *scored, int count, uint16_t *probabilities) {
-    int elite_count = count < V4_INIT_ELITES ? count : V4_INIT_ELITES;
+static void pbil_probabilities_from_elites(
+    const scored_genome_t *scored,
+    int count,
+    int elite_count_limit,
+    int min_q15,
+    int max_q15,
+    uint16_t *probabilities
+) {
+    int elite_count = count < elite_count_limit ? count : elite_count_limit;
 
     for (int bit = 0; bit < UART_STREAM_V2_GENOME_BITS; bit++) {
         int ones = 0;
@@ -334,7 +350,11 @@ static void pbil_probabilities_from_elites(const scored_genome_t *scored, int co
                 ones++;
             }
         }
-        probabilities[bit] = (uint16_t)clamp_q15((ones * V4_PBIL_Q15 + (elite_count / 2)) / elite_count);
+        probabilities[bit] = (uint16_t)clamp_q15(
+            (ones * V4_PBIL_Q15 + (elite_count / 2)) / elite_count,
+            min_q15,
+            max_q15
+        );
     }
 }
 
@@ -349,8 +369,17 @@ static uart_sampler_genome_v2_t pbil_sample(uint16_t *state, const uint16_t *pro
     return uart_v2_decode_genome(raw);
 }
 
-static void pbil_update(uint16_t *probabilities, scored_genome_t *batch, int count) {
-    int elite_count = count < V4_PBIL_ELITES ? count : V4_PBIL_ELITES;
+static void pbil_update(
+    uint16_t *probabilities,
+    scored_genome_t *batch,
+    int count,
+    int elite_count_limit,
+    int learning_shift,
+    int mutation_shift,
+    int min_q15,
+    int max_q15
+) {
+    int elite_count = count < elite_count_limit ? count : elite_count_limit;
 
     if (elite_count <= 0) {
         return;
@@ -368,9 +397,9 @@ static void pbil_update(uint16_t *probabilities, scored_genome_t *batch, int cou
             }
         }
         target = (ones * V4_PBIL_Q15 + (elite_count / 2)) / elite_count;
-        value = q15_step_toward(probabilities[bit], target, V4_PBIL_LEARNING_SHIFT);
-        value = q15_step_toward(value, V4_PBIL_HALF_Q15, V4_PBIL_MUTATION_SHIFT);
-        probabilities[bit] = (uint16_t)clamp_q15(value);
+        value = q15_step_toward(probabilities[bit], target, learning_shift);
+        value = q15_step_toward(value, V4_PBIL_HALF_Q15, mutation_shift);
+        probabilities[bit] = (uint16_t)clamp_q15(value, min_q15, max_q15);
     }
 }
 
@@ -625,15 +654,32 @@ uart_stream_v2_arm_result_t uart_v2_bitflip1_topdecile_v4_arm_train_only(int bud
     return result;
 }
 
-uart_stream_v2_arm_result_t uart_v2_pbil_eda_v4_arm_train_only(int budget, uint16_t seed, int frames) {
+static uart_stream_v2_arm_result_t pbil_arm_train_only(
+    const char *arm_name,
+    int budget,
+    uint16_t seed,
+    int frames,
+    int batch_size,
+    int sample_count,
+    int refinement_count,
+    int elite_count,
+    int learning_shift,
+    int mutation_shift,
+    int min_q15,
+    int max_q15,
+    int restart_checkpoint
+) {
     uint16_t state = seed;
     scored_genome_t scored[V4_INIT_POOL];
     uint16_t probabilities[UART_STREAM_V2_GENOME_BITS];
     int best_passed = -1;
     int used;
     int order;
+    int checkpoint_best;
+    int since_checkpoint = 0;
     uart_stream_v2_arm_result_t result = make_empty_result();
 
+    (void)arm_name;
     if (budget <= 0) {
         return result;
     }
@@ -642,14 +688,16 @@ uart_stream_v2_arm_result_t uart_v2_pbil_eda_v4_arm_train_only(int budget, uint1
     result.best_train_passed = best_passed;
     result.train_total = train_total_for_frames(frames);
     result.evals = used * result.train_total;
-    pbil_probabilities_from_elites(scored, used, probabilities);
+    pbil_probabilities_from_elites(scored, used, V4_INIT_ELITES, min_q15, max_q15, probabilities);
     order = used;
+    checkpoint_best = best_passed;
 
     while (used < budget) {
-        int batch_count = (budget - used) < V4_PBIL_BATCH ? (budget - used) : V4_PBIL_BATCH;
-        scored_genome_t batch[V4_PBIL_BATCH];
+        int batch_count = (budget - used) < batch_size ? (budget - used) : batch_size;
+        int pbil_count = batch_count < sample_count ? batch_count : sample_count;
+        scored_genome_t batch[V5_PBIL_BATCH];
 
-        for (int idx = 0; idx < batch_count; idx++) {
+        for (int idx = 0; idx < pbil_count; idx++) {
             int candidate_total = 0;
             batch[idx].genome = pbil_sample(&state, probabilities);
             batch[idx].passed = uart_v2_score_split("train", batch[idx].genome, frames, &candidate_total);
@@ -663,11 +711,122 @@ uart_stream_v2_arm_result_t uart_v2_pbil_eda_v4_arm_train_only(int budget, uint1
             }
             order++;
             used++;
+            since_checkpoint++;
         }
-        pbil_update(probabilities, batch, batch_count);
+        pbil_update(
+            probabilities,
+            batch,
+            pbil_count,
+            elite_count,
+            learning_shift,
+            mutation_shift,
+            min_q15,
+            max_q15
+        );
+
+        for (int idx = 0; idx < refinement_count && used < budget; idx++) {
+            uart_sampler_genome_v2_t genome;
+            int candidate_total = 0;
+            int candidate_passed;
+
+            (void)uart_v2_landscape_child("bitflip_1", &state, result.best_genome, &genome);
+            candidate_passed = uart_v2_score_split("train", genome, frames, &candidate_total);
+            result.evals += candidate_total;
+            if (candidate_passed >= best_passed) {
+                best_passed = candidate_passed;
+                result.best_genome = genome;
+                result.best_train_passed = candidate_passed;
+                result.train_total = candidate_total;
+            }
+            order++;
+            used++;
+            since_checkpoint++;
+        }
+
+        if (restart_checkpoint > 0 && since_checkpoint >= restart_checkpoint) {
+            if (best_passed <= checkpoint_best) {
+                for (int bit = 0; bit < UART_STREAM_V2_GENOME_BITS; bit++) {
+                    probabilities[bit] = V4_PBIL_HALF_Q15;
+                }
+            }
+            checkpoint_best = best_passed;
+            since_checkpoint = 0;
+        }
     }
     finalize_holdout(&result, frames);
     return result;
+}
+
+uart_stream_v2_arm_result_t uart_v2_pbil_eda_v4_arm_train_only(int budget, uint16_t seed, int frames) {
+    return pbil_arm_train_only(
+        "pbil_eda_v4",
+        budget,
+        seed,
+        frames,
+        V4_PBIL_BATCH,
+        V4_PBIL_BATCH,
+        0,
+        V4_PBIL_ELITES,
+        V4_PBIL_LEARNING_SHIFT,
+        V4_PBIL_MUTATION_SHIFT,
+        V4_PBIL_MIN_Q15,
+        V4_PBIL_MAX_Q15,
+        0
+    );
+}
+
+uart_stream_v2_arm_result_t uart_v2_pbil_stable_v5_arm_train_only(int budget, uint16_t seed, int frames) {
+    return pbil_arm_train_only(
+        "pbil_stable_v5",
+        budget,
+        seed,
+        frames,
+        V5_PBIL_BATCH,
+        V5_PBIL_BATCH,
+        0,
+        V5_PBIL_ELITES,
+        V5_PBIL_LEARNING_SHIFT,
+        V5_PBIL_MUTATION_SHIFT,
+        V5_PBIL_MIN_Q15,
+        V5_PBIL_MAX_Q15,
+        0
+    );
+}
+
+uart_stream_v2_arm_result_t uart_v2_pbil_restart_v5_arm_train_only(int budget, uint16_t seed, int frames) {
+    return pbil_arm_train_only(
+        "pbil_restart_v5",
+        budget,
+        seed,
+        frames,
+        V5_PBIL_BATCH,
+        V5_PBIL_BATCH,
+        0,
+        V5_PBIL_ELITES,
+        V5_PBIL_LEARNING_SHIFT,
+        V5_PBIL_MUTATION_SHIFT,
+        V5_PBIL_MIN_Q15,
+        V5_PBIL_MAX_Q15,
+        V5_PBIL_RESTART_CHECKPOINT
+    );
+}
+
+uart_stream_v2_arm_result_t uart_v2_pbil_hybrid_v5_arm_train_only(int budget, uint16_t seed, int frames) {
+    return pbil_arm_train_only(
+        "pbil_hybrid_v5",
+        budget,
+        seed,
+        frames,
+        V5_PBIL_BATCH,
+        V5_PBIL_SAMPLE_COUNT,
+        V5_PBIL_REFINEMENTS,
+        V5_PBIL_ELITES,
+        V5_PBIL_LEARNING_SHIFT,
+        V5_PBIL_MUTATION_SHIFT,
+        V5_PBIL_MIN_Q15,
+        V5_PBIL_MAX_Q15,
+        0
+    );
 }
 
 uart_stream_v2_arm_result_t uart_v2_variant_arm_train_holdout(
@@ -694,6 +853,12 @@ uart_stream_v2_arm_result_t uart_v2_variant_arm_train_holdout(
         result = uart_v2_bitflip1_topdecile_v4_arm_train_only(budget, seed, train_frames);
     } else if (streq(variant, "pbil_eda_v4")) {
         result = uart_v2_pbil_eda_v4_arm_train_only(budget, seed, train_frames);
+    } else if (streq(variant, "pbil_stable_v5")) {
+        result = uart_v2_pbil_stable_v5_arm_train_only(budget, seed, train_frames);
+    } else if (streq(variant, "pbil_restart_v5")) {
+        result = uart_v2_pbil_restart_v5_arm_train_only(budget, seed, train_frames);
+    } else if (streq(variant, "pbil_hybrid_v5")) {
+        result = uart_v2_pbil_hybrid_v5_arm_train_only(budget, seed, train_frames);
     } else if (streq(variant, "random")) {
         result = uart_v2_random_arm_train_only(budget, seed, train_frames);
     } else {

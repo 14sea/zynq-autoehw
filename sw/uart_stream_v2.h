@@ -50,6 +50,9 @@ uart_stream_v2_arm_result_t uart_v2_immigrant_hillclimb_arm_train_only(int budge
 uart_stream_v2_arm_result_t uart_v2_beam4_ga_arm_train_only(int budget, uint16_t seed, int frames);
 uart_stream_v2_arm_result_t uart_v2_bitflip1_topdecile_v4_arm_train_only(int budget, uint16_t seed, int frames);
 uart_stream_v2_arm_result_t uart_v2_pbil_eda_v4_arm_train_only(int budget, uint16_t seed, int frames);
+uart_stream_v2_arm_result_t uart_v2_pbil_stable_v5_arm_train_only(int budget, uint16_t seed, int frames);
+uart_stream_v2_arm_result_t uart_v2_pbil_restart_v5_arm_train_only(int budget, uint16_t seed, int frames);
+uart_stream_v2_arm_result_t uart_v2_pbil_hybrid_v5_arm_train_only(int budget, uint16_t seed, int frames);
 uart_stream_v2_arm_result_t uart_v2_variant_arm_train_holdout(
     const char *variant,
     int budget,
