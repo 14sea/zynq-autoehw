@@ -264,6 +264,36 @@ class UartStreamV2HeadroomTest(unittest.TestCase):
                 sum(score.frames for score in holdout.conditions),
             ), variant)
 
+    def test_c_twin_matches_python_v7_deep_selection_variants(self):
+        if not V2_C_TWIN.exists():
+            self.skipTest(f"v2 C twin not built: {V2_C_TWIN}")
+        budget = 360
+        train_frames = 2
+        deep_frames = 256
+        holdout_frames = 4
+        seed = 0x47AD
+        for variant in ("pbil_island4_deep_v7", "pbil_island4_margin_v7"):
+            result = variant_arm_train_only(variant, budget, seed, train_frames)
+            deep_train = score_set("train", result.best_genome, deep_frames)
+            holdout = score_set("holdout", result.best_genome, holdout_frames)
+            proc = subprocess.run(
+                [str(V2_C_TWIN), "variant", variant, str(budget), hex(seed), str(train_frames), str(holdout_frames)],
+                cwd=ROOT,
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            fields = proc.stdout.strip().split()
+            self.assertEqual(int(fields[2], 16), encode_genome(result.best_genome), variant)
+            self.assertEqual((int(fields[12]), int(fields[13])), (
+                sum(score.passed for score in deep_train.conditions),
+                sum(score.frames for score in deep_train.conditions),
+            ), variant)
+            self.assertEqual((int(fields[15]), int(fields[16])), (
+                sum(score.passed for score in holdout.conditions),
+                sum(score.frames for score in holdout.conditions),
+            ), variant)
+
     def test_c_twin_matches_python_v4_landscape_kernels(self):
         if not V2_C_TWIN.exists():
             self.skipTest(f"v2 C twin not built: {V2_C_TWIN}")
@@ -425,6 +455,49 @@ class UartStreamV2HeadroomTest(unittest.TestCase):
         self.assertEqual(report["protocol"], "prereg_search_v6")
         self.assertEqual(report["budget"], 240)
         self.assertEqual(set(report["variants"].keys()), {"pbil_island2_v6", "pbil_island3_v6", "pbil_island4_v6"})
+
+    def test_v7_screening_script_smoke(self):
+        if not V2_C_TWIN.exists():
+            self.skipTest(f"v2 C twin not built: {V2_C_TWIN}")
+        proc = subprocess.run(
+            [
+                "python3",
+                "host/screen_v7_search.py",
+                "--cli",
+                str(V2_C_TWIN),
+                "--budget",
+                "240",
+                "--deep-budget",
+                "224",
+                "--train-frames",
+                "2",
+                "--holdout-frames",
+                "4",
+                "--seeds",
+                "0x1357,0x2468",
+                "--variants",
+                "pbil_island4_deep_v7,pbil_island4_margin_v7,pbil_island4_v6",
+                "--jobs",
+                "2",
+                "--json",
+            ],
+            cwd=ROOT,
+            check=True,
+            text=True,
+            capture_output=True,
+        )
+        report = json.loads(proc.stdout)
+        self.assertEqual(report["protocol"], "prereg_search_v7")
+        self.assertEqual(report["budget"], 240)
+        self.assertEqual(report["deep_budget"], 224)
+        self.assertEqual(set(report["variants"].keys()), {
+            "pbil_island4_deep_v7",
+            "pbil_island4_margin_v7",
+            "pbil_island4_v6",
+        })
+        for row in report["variants"]["pbil_island4_deep_v7"]["rows"]:
+            self.assertEqual(row["variant_budget"], 224)
+            self.assertEqual(row["random_budget"], 240)
 
     def test_v4_landscape_probe_smoke(self):
         proc = subprocess.run(

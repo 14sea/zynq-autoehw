@@ -44,6 +44,8 @@ enum {
     V5_PBIL_RESTART_CHECKPOINT = 2048,
     V6_ISLAND_SEED_SALT = 0x3000,
     V6_ISLAND_SEED_STEP = 0x1F3D,
+    V7_DEEP_SELECTION_FRAMES = 256,
+    V7_MARGIN_PASSED = 8,
 };
 
 typedef struct {
@@ -876,6 +878,123 @@ uart_stream_v2_arm_result_t uart_v2_pbil_island4_v6_arm_train_only(int budget, u
     return pbil_island_v6_arm_train_only(budget, seed, frames, 4);
 }
 
+static int pbil_island4_results(
+    int budget,
+    uint16_t seed,
+    int frames,
+    uart_stream_v2_arm_result_t *results
+) {
+    enum { ISLANDS = 4 };
+    int count = 0;
+
+    for (int island = 0; island < ISLANDS; island++) {
+        int island_budget = budget / ISLANDS + (island < (budget % ISLANDS) ? 1 : 0);
+        if (island_budget <= 0) {
+            continue;
+        }
+        results[count] = uart_v2_pbil_eda_v4_arm_train_only(island_budget, island_seed(seed, island), frames);
+        count++;
+    }
+    return count;
+}
+
+uart_stream_v2_arm_result_t uart_v2_pbil_island4_deep_v7_arm_train_only(int budget, uint16_t seed, int frames) {
+    enum { ISLANDS = 4 };
+    uart_stream_v2_arm_result_t islands[ISLANDS];
+    uart_stream_v2_arm_result_t result = make_empty_result();
+    int count;
+    int best_deep = -1;
+    int deep_total = 0;
+
+    if (budget <= 0) {
+        return result;
+    }
+
+    count = pbil_island4_results(budget, seed, frames, islands);
+    for (int island = 0; island < count; island++) {
+        int total = 0;
+        int deep_passed = uart_v2_score_split(
+            "train",
+            islands[island].best_genome,
+            V7_DEEP_SELECTION_FRAMES,
+            &total
+        );
+        result.evals += islands[island].evals + total;
+        if (deep_passed > best_deep) {
+            best_deep = deep_passed;
+            deep_total = total;
+            result.best_genome = islands[island].best_genome;
+            result.best_train_passed = deep_passed;
+            result.train_total = total;
+        }
+    }
+    if (result.train_total == 0) {
+        result.train_total = deep_total;
+    }
+    finalize_holdout(&result, frames);
+    return result;
+}
+
+uart_stream_v2_arm_result_t uart_v2_pbil_island4_margin_v7_arm_train_only(int budget, uint16_t seed, int frames) {
+    enum { ISLANDS = 4 };
+    uart_stream_v2_arm_result_t islands[ISLANDS];
+    uart_stream_v2_arm_result_t result = make_empty_result();
+    int count;
+    int incumbent = 0;
+    int incumbent_deep;
+    int best_deep;
+    int deep_total = 0;
+
+    if (budget <= 0) {
+        return result;
+    }
+
+    count = pbil_island4_results(budget, seed, frames, islands);
+    if (count <= 0) {
+        return result;
+    }
+    for (int island = 1; island < count; island++) {
+        if (islands[island].best_train_passed > islands[incumbent].best_train_passed) {
+            incumbent = island;
+        }
+    }
+
+    incumbent_deep = uart_v2_score_split(
+        "train",
+        islands[incumbent].best_genome,
+        V7_DEEP_SELECTION_FRAMES,
+        &deep_total
+    );
+    result.best_genome = islands[incumbent].best_genome;
+    result.best_train_passed = incumbent_deep;
+    result.train_total = deep_total;
+    best_deep = incumbent_deep;
+
+    for (int island = 0; island < count; island++) {
+        int total = 0;
+        int deep_passed = uart_v2_score_split(
+            "train",
+            islands[island].best_genome,
+            V7_DEEP_SELECTION_FRAMES,
+            &total
+        );
+        result.evals += islands[island].evals + total;
+        if (island == incumbent) {
+            continue;
+        }
+        if (deep_passed >= incumbent_deep + V7_MARGIN_PASSED &&
+            (deep_passed > best_deep || (deep_passed == best_deep && island < incumbent))) {
+            best_deep = deep_passed;
+            incumbent = island;
+            result.best_genome = islands[island].best_genome;
+            result.best_train_passed = deep_passed;
+            result.train_total = total;
+        }
+    }
+    finalize_holdout(&result, frames);
+    return result;
+}
+
 uart_stream_v2_arm_result_t uart_v2_variant_arm_train_holdout(
     const char *variant,
     int budget,
@@ -912,6 +1031,10 @@ uart_stream_v2_arm_result_t uart_v2_variant_arm_train_holdout(
         result = uart_v2_pbil_island3_v6_arm_train_only(budget, seed, train_frames);
     } else if (streq(variant, "pbil_island4_v6")) {
         result = uart_v2_pbil_island4_v6_arm_train_only(budget, seed, train_frames);
+    } else if (streq(variant, "pbil_island4_deep_v7")) {
+        result = uart_v2_pbil_island4_deep_v7_arm_train_only(budget, seed, train_frames);
+    } else if (streq(variant, "pbil_island4_margin_v7")) {
+        result = uart_v2_pbil_island4_margin_v7_arm_train_only(budget, seed, train_frames);
     } else if (streq(variant, "random")) {
         result = uart_v2_random_arm_train_only(budget, seed, train_frames);
     } else {

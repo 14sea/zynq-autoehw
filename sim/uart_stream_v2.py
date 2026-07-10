@@ -50,6 +50,8 @@ V5_PBIL_MUTATION_SHIFT = 5
 V5_PBIL_RESTART_CHECKPOINT = 2048
 V6_ISLAND_SEED_SALT = 0x3000
 V6_ISLAND_SEED_STEP = 0x1F3D
+V7_DEEP_SELECTION_FRAMES = 256
+V7_MARGIN_PASSED = 8
 
 
 @dataclass(frozen=True)
@@ -679,6 +681,73 @@ def pbil_island_v6_arm_train_only(
     return ArmResult(arm, best_genome, best_fitness, tuple())
 
 
+def _pbil_island_results(
+    islands: int,
+    budget: int,
+    seed: int,
+    frames: int,
+) -> list[tuple[int, ArmResult]]:
+    results: list[tuple[int, ArmResult]] = []
+    for island in range(islands):
+        island_budget = budget // islands + (1 if island < (budget % islands) else 0)
+        if island_budget <= 0:
+            continue
+        results.append((island, pbil_eda_v4_arm_train_only(island_budget, _island_seed(seed, island), frames)))
+    return results
+
+
+def pbil_island4_deep_v7_arm_train_only(
+    budget: int,
+    seed: int,
+    frames: int = DEFAULT_FRAMES,
+    deep_frames: int = V7_DEEP_SELECTION_FRAMES,
+) -> ArmResult:
+    if budget <= 0:
+        raise ValueError("budget must be positive")
+    results = _pbil_island_results(4, budget, seed, frames)
+    best_genome = STATIC_BASELINE
+    best_deep = -1
+    total = len(conditions_for("train")) * deep_frames
+    for island, result in results:
+        deep_passed = train_passed(result.best_genome, deep_frames)
+        if deep_passed > best_deep:
+            best_genome = result.best_genome
+            best_deep = deep_passed
+    return ArmResult("pbil_island4_deep_v7", best_genome, best_deep / total, tuple())
+
+
+def pbil_island4_margin_v7_arm_train_only(
+    budget: int,
+    seed: int,
+    frames: int = DEFAULT_FRAMES,
+    deep_frames: int = V7_DEEP_SELECTION_FRAMES,
+) -> ArmResult:
+    if budget <= 0:
+        raise ValueError("budget must be positive")
+    results = _pbil_island_results(4, budget, seed, frames)
+    if not results:
+        return ArmResult("pbil_island4_margin_v7", STATIC_BASELINE, 0.0, tuple())
+
+    incumbent_island, incumbent = max(results, key=lambda item: (item[1].best_fitness_train, -item[0]))
+    best_genome = incumbent.best_genome
+    incumbent_deep = train_passed(best_genome, deep_frames)
+    best_deep = incumbent_deep
+    total = len(conditions_for("train")) * deep_frames
+
+    for island, result in results:
+        if island == incumbent_island:
+            continue
+        deep_passed = train_passed(result.best_genome, deep_frames)
+        if deep_passed >= incumbent_deep + V7_MARGIN_PASSED and (
+            deep_passed > best_deep or (deep_passed == best_deep and island < incumbent_island)
+        ):
+            best_genome = result.best_genome
+            best_deep = deep_passed
+            incumbent_island = island
+
+    return ArmResult("pbil_island4_margin_v7", best_genome, best_deep / total, tuple())
+
+
 def pbil_island2_v6_arm_train_only(budget: int, seed: int, frames: int = DEFAULT_FRAMES) -> ArmResult:
     return pbil_island_v6_arm_train_only("pbil_island2_v6", 2, budget, seed, frames)
 
@@ -717,6 +786,10 @@ def variant_arm_train_only(variant: str, budget: int, seed: int, frames: int = D
         return pbil_island3_v6_arm_train_only(budget, seed, frames)
     if variant == "pbil_island4_v6":
         return pbil_island4_v6_arm_train_only(budget, seed, frames)
+    if variant == "pbil_island4_deep_v7":
+        return pbil_island4_deep_v7_arm_train_only(budget, seed, frames)
+    if variant == "pbil_island4_margin_v7":
+        return pbil_island4_margin_v7_arm_train_only(budget, seed, frames)
     if variant == "random":
         result = random_arm_train_only(budget, seed, frames)
         return ArmResult(variant, result.best_genome, result.best_fitness_train, result.generations)
