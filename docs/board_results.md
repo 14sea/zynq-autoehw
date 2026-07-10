@@ -573,3 +573,52 @@ the *final* champion holdout evaluation needs the extra frames.
 - ❌ Not beats-random on holdout — blocked by holdout statistical resolution
   (16 samples), not by the search. Next drop: high-frame final-champion holdout
   evaluation (+ optionally a reported noise band) to make the judgment decidable.
+
+---
+
+## M1-full v2 A/B with HIGH-RES holdout — the beats-random verdict (2026-07-10) — **DECIDABLE: NOT beats-random; train edge is overfit**
+
+Rerun of the multi-hour same-boot A/B with the high-resolution final holdout
+(commit `187e83c`: final champions evaluated on 4×256 = **1024 holdout samples**;
+search, equal-budget, heartbeats, firewall unchanged). `dfx_top.bit` md5
+`6337a4ef…`, calibration verified live (~10.1 s heartbeats), run ≈ 122 min
+(anchored by the ymodem log: load 04:19 → final ≈ 06:22), 0 stuck alerts.
+
+### Result (both arms bit-exact to the host v2 oracle, incl. the 1024-frame holdout)
+
+| arm | genome | train | holdout | holdout % |
+|---|---|---|---|---|
+| GA | `0x09571273ce` | **4/16** | 60/1024 | 5.86 % |
+| random | `0x6cbfb15fd8` | 2/16 | 64/1024 | 6.25 % |
+
+Δ(holdout) = 4/1024 with σ(diff of two binomials at ~6 %, n=1024) ≈ 10.7 →
+z ≈ 0.4: a **statistical tie**. The resolution problem from the previous run is
+fixed (6.25 % quantization → ~0.1 %), so the question is now *decidable* — and
+the answer is: **the GA's clear train advantage (4/16 vs 2/16, reproduced across
+two independent runs) does not generalize to holdout.**
+
+### Diagnosis — the fitness signal, not the holdout, is now the limiter
+
+The train fitness is only **16 deterministic evals** (4 conditions × 4 frames)
+per candidate. At this task difficulty (~6 % per-frame pass), a 39-bit-genome GA
+hill-climbing on a fixed 16-sample signal memorizes those exact frames: the two
+runs' GA champions differ (`0x08d590f3ee`, `0x09571273ce`) yet both hit 4/16
+train and ~6 % holdout. The random arm's champion is identical across runs
+(first-found tie-keeping over a coarse score scale — many genomes tie at 2/16
+and the earliest wins, which the budget-16 smoke also found).
+
+**Fix direction (relayed):** enrich the *train* signal so fitness reflects
+generalizable quality — more train frames per candidate (16 → 64–128) and/or
+multiple stimulus seeds per condition. Throughput cost (~4–8×) is absorbed by
+the v2 speed-probe calibration (budget shrinks accordingly). Holdout method
+stays as-is (1024-frame final eval, now proven).
+
+### Standing
+
+- ✅ Multi-hour autonomous A/B machinery: fully board-verified, calibrated,
+  bit-exact, replayable — the *runtime* claims stand.
+- ✅ GA > random on the optimization objective (train), reproduced twice.
+- ❌ Beats-random on holdout: **decidably not**, with adequate resolution —
+  an honest falsification-in-progress of the benchmark's train-signal design,
+  exactly what the M0 claim discipline is for. Next benchmark iteration targets
+  the train signal.
