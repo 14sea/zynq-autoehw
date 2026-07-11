@@ -10,7 +10,7 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from sim.uart_stream_v1 import CONDITIONS, STATIC_BASELINE, SamplerConfig, frame_passes
+from sim.uart_stream_v1 import CONDITIONS, STATIC_BASELINE, SamplerConfig, frame_passes, uart_frame_bit_matches
 
 
 EDGE_SCORE = {"low": 2, "med": 5, "high": 8}
@@ -36,6 +36,7 @@ def main() -> int:
         for frame_idx in range(args.frames):
             for config in configs:
                 expected = int(frame_passes(condition, config, frame_idx))
+                graded = uart_frame_bit_matches(condition, config, frame_idx)
                 mode = PAYLOAD_MODE.get(condition.name, 0)
                 lines.append(
                     " ".join(
@@ -53,6 +54,7 @@ def main() -> int:
                             config.threshold,
                             config.majority_window,
                             expected,
+                            graded,
                         )
                     )
                 )

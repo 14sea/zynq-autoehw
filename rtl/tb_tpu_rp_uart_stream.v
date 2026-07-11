@@ -14,6 +14,7 @@ module tb_tpu_rp_uart_stream;
     localparam UART_REG_SAMPLE_PHASE    = 32'h028;
     localparam UART_REG_THRESHOLD       = 32'h02C;
     localparam UART_REG_MAJORITY_WINDOW = 32'h030;
+    localparam UART_REG_GRADED_SCORE    = 32'h038;
 
     reg clk = 1'b0;
     reg rst_n = 1'b0;
@@ -28,6 +29,7 @@ module tb_tpu_rp_uart_stream;
     wire xbus_err;
     wire [3:0] dbg_leds;
     integer guard;
+    reg [31:0] status_seen;
 
     tpu_rp dut (
         .clk(clk),
@@ -148,6 +150,11 @@ module tb_tpu_rp_uart_stream;
                          xbus_dat_r, xbus_err, dbg_leds);
                 $finish(1);
             end
+            xbus_read_stretched(UART_REG_GRADED_SCORE);
+            if (xbus_dat_r != 32'd392) begin
+                $display("stretched-cyc graded mismatch: got=%0d expected=392", xbus_dat_r);
+                $finish(1);
+            end
             xbus_cyc = 1'b0;
         end
     endtask
@@ -181,8 +188,14 @@ module tb_tpu_rp_uart_stream;
                      xbus_dat_r, xbus_err, dbg_leds);
             $finish(1);
         end
+        status_seen = xbus_dat_r;
+        xbus_read(UART_REG_GRADED_SCORE);
+        if (xbus_dat_r != 32'd392) begin
+            $display("tpu_rp uart stream graded mismatch: got=%0d expected=392", xbus_dat_r);
+            $finish(1);
+        end
         program_h1_best_f7_stretched();
-        $display("tpu_rp uart_stream xbus smoke PASS status=%08x", xbus_dat_r);
+        $display("tpu_rp uart_stream xbus smoke PASS status=%08x graded=%0d", status_seen, xbus_dat_r);
         $finish(0);
     end
 endmodule

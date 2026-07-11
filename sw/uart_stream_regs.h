@@ -17,6 +17,7 @@
 #define UART_REG_THRESHOLD       0x2Cu
 #define UART_REG_MAJORITY_WINDOW 0x30u
 #define UART_REG_CYCLES          0x34u
+#define UART_REG_GRADED_SCORE    0x38u
 
 #define UART_CTRL_START          0x00000001u
 #define UART_CTRL_CLEAR_DONE     0x00000002u
@@ -40,4 +41,3 @@ typedef struct {
 } uart_eval_regs_t;
 
 #endif
-

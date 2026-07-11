@@ -14,6 +14,7 @@ module tb_uart_stream_island_regs;
     localparam UART_REG_SAMPLE_PHASE    = 8'h28;
     localparam UART_REG_THRESHOLD       = 8'h2C;
     localparam UART_REG_MAJORITY_WINDOW = 8'h30;
+    localparam UART_REG_GRADED_SCORE    = 8'h38;
 
     reg clk = 1'b0;
     reg rst = 1'b1;
@@ -23,6 +24,7 @@ module tb_uart_stream_island_regs;
     reg [31:0] wr_data = 32'd0;
     wire [31:0] rd_data;
     integer guard;
+    reg [31:0] status_seen;
 
     uart_stream_island_regs dut (
         .clk(clk),
@@ -91,7 +93,13 @@ module tb_uart_stream_island_regs;
                 $display("island wrapper expected pass, status=%08x", rd_data);
                 $finish(1);
             end
-            $display("uart_stream_island_regs smoke PASS status=%08x", rd_data);
+            status_seen = rd_data;
+            read_reg(UART_REG_GRADED_SCORE);
+            if (rd_data != 32'd392) begin
+                $display("island wrapper graded mismatch: got=%0d expected=392", rd_data);
+                $finish(1);
+            end
+            $display("uart_stream_island_regs smoke PASS status=%08x graded=%0d", status_seen, rd_data);
         end
     endtask
 

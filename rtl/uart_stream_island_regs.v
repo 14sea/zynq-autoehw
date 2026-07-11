@@ -23,6 +23,7 @@ module uart_stream_island_regs (
     localparam UART_REG_THRESHOLD       = 8'h2C;
     localparam UART_REG_MAJORITY_WINDOW = 8'h30;
     localparam UART_REG_CYCLES          = 8'h34;
+    localparam UART_REG_GRADED_SCORE    = 8'h38;
 
     reg start_pulse;
     reg done_latched;
@@ -41,6 +42,7 @@ module uart_stream_island_regs (
     wire busy;
     wire done;
     wire pass;
+    wire [9:0] graded_score;
     wire [15:0] cycles;
 
     uart_stream_eval_core eval_core (
@@ -61,6 +63,7 @@ module uart_stream_island_regs (
         .busy(busy),
         .done(done),
         .pass(pass),
+        .graded_score(graded_score),
         .cycles(cycles)
     );
 
@@ -135,6 +138,7 @@ module uart_stream_island_regs (
                 UART_REG_THRESHOLD: rd_data = {{24{threshold[7]}}, threshold};
                 UART_REG_MAJORITY_WINDOW: rd_data = {29'd0, majority_window};
                 UART_REG_CYCLES: rd_data = {16'd0, cycles};
+                UART_REG_GRADED_SCORE: rd_data = {22'd0, graded_score};
                 default: rd_data = 32'd0;
             endcase
         end
@@ -142,4 +146,3 @@ module uart_stream_island_regs (
 endmodule
 
 `default_nettype wire
-

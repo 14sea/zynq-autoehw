@@ -18,6 +18,7 @@ module tb_uart_stream_eval_core;
     wire busy;
     wire done;
     wire pass;
+    wire [9:0] graded_score;
     wire [15:0] cycles;
     reg [1023:0] vector_path;
     reg verbose;
@@ -39,6 +40,7 @@ module tb_uart_stream_eval_core;
     integer v_threshold;
     integer v_majority_window;
     integer v_expected_pass;
+    integer v_expected_graded;
 
     uart_stream_eval_core dut (
         .clk(clk),
@@ -58,6 +60,7 @@ module tb_uart_stream_eval_core;
         .busy(busy),
         .done(done),
         .pass(pass),
+        .graded_score(graded_score),
         .cycles(cycles)
     );
 
@@ -77,6 +80,7 @@ module tb_uart_stream_eval_core;
         input signed [7:0] in_threshold;
         input [2:0] in_majority_window;
         input expected_pass;
+        input [9:0] expected_graded;
         integer guard;
         begin
             @(negedge clk);
@@ -108,8 +112,14 @@ module tb_uart_stream_eval_core;
                 $display("%0s mismatch: got=%0d expected=%0d cycles=%0d", label, pass, expected_pass, cycles);
                 $finish(1);
             end
+            if (graded_score !== expected_graded) begin
+                $display("%0s graded mismatch: got=%0d expected=%0d pass=%0d cycles=%0d",
+                         label, graded_score, expected_graded, pass, cycles);
+                $finish(1);
+            end
             if (verbose) begin
-                $display("%0s PASS expected=%0d cycles=%0d", label, expected_pass, cycles);
+                $display("%0s PASS expected=%0d graded=%0d cycles=%0d",
+                         label, expected_pass, expected_graded, cycles);
             end
         end
     endtask
@@ -134,7 +144,7 @@ module tb_uart_stream_eval_core;
         while (!$feof(fd)) begin
             rc = $fscanf(
                 fd,
-                "%d %d %d %d %d %d %d %d %d %d %d %d\n",
+                "%d %d %d %d %d %d %d %d %d %d %d %d %d\n",
                 v_packet_len,
                 v_lfsr_seed,
                 v_baud_ppm,
@@ -146,13 +156,15 @@ module tb_uart_stream_eval_core;
                 v_sample_phase,
                 v_threshold,
                 v_majority_window,
-                v_expected_pass
+                v_expected_pass,
+                v_expected_graded
             );
-            if (rc == 12) begin
+            if (rc == 13) begin
                 run_case("vector", v_packet_len[6:0], v_lfsr_seed[15:0], v_baud_ppm[15:0],
                          v_jitter_milli[15:0], v_flip_ppm[31:0], v_edge_score[3:0],
                          v_payload_mode[1:0], v_frame_idx[15:0], v_sample_phase[4:0],
-                         v_threshold[7:0], v_majority_window[2:0], v_expected_pass[0]);
+                         v_threshold[7:0], v_majority_window[2:0], v_expected_pass[0],
+                         v_expected_graded[9:0]);
                 vector_count = vector_count + 1;
                 if (v_expected_pass) begin
                     pass_count = pass_count + 1;

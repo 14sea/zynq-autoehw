@@ -18,6 +18,7 @@ module uart_stream_eval_core (
     output reg         busy,
     output reg         done,
     output reg         pass,
+    output reg  [9:0]  graded_score,
     output reg  [15:0] cycles
 );
     localparam S_IDLE = 4'd0;
@@ -55,6 +56,18 @@ module uart_stream_eval_core (
     reg tmp_decoded_bit;
     reg [2:0] tmp_ones;
     reg tmp_majority_bit;
+    reg [7:0] tmp_diff;
+
+    function [3:0] popcount8;
+        input [7:0] value;
+        integer i;
+        begin
+            popcount8 = 4'd0;
+            for (i = 0; i < 8; i = i + 1) begin
+                popcount8 = popcount8 + {3'd0, value[i]};
+            end
+        end
+    endfunction
 
     function [15:0] lfsr_next;
         input [15:0] value;
@@ -122,6 +135,7 @@ module uart_stream_eval_core (
             busy <= 1'b0;
             done <= 1'b0;
             pass <= 1'b0;
+            graded_score <= 10'd0;
             cycles <= 16'd0;
         end else begin
             done <= 1'b0;
@@ -135,6 +149,7 @@ module uart_stream_eval_core (
                     if (start) begin
                         busy <= 1'b1;
                         pass <= 1'b0;
+                        graded_score <= 10'd0;
                         cycles <= 16'd0;
                         byte_idx <= 7'd0;
                         bit_idx <= 3'd0;
@@ -212,6 +227,8 @@ module uart_stream_eval_core (
                         vote_idx <= 3'd0;
                         decoded_byte <= tmp_decoded_byte;
                         if (bit_idx == 3'd7) begin
+                            tmp_diff = tmp_decoded_byte ^ source_byte;
+                            graded_score <= graded_score + (10'd8 - {6'd0, popcount8(tmp_diff)});
                             if (byte_idx == packet_len) begin
                                 pass <= (decoded_crc == tmp_decoded_byte);
                                 state <= S_DONE;

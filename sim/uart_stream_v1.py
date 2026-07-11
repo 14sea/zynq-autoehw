@@ -205,6 +205,22 @@ def frame_passes(condition: Condition, config: SamplerConfig, frame_idx: int) ->
     return crc8(decoded_payload) == decoded_crc
 
 
+def uart_frame_bit_matches(condition: Condition, config: SamplerConfig, frame_idx: int) -> int:
+    payload = _payload(condition, frame_idx)
+    sent = payload + [crc8(payload)]
+    state = (condition.lfsr_seed ^ 0xC0DE ^ (frame_idx * 0x1021)) & 0xFFFF
+    matches = 0
+
+    for byte in sent:
+        decoded = 0
+        for bit_idx in range(8):
+            state, bit = _vote_bit((byte >> bit_idx) & 1, condition, config, state)
+            decoded |= bit << bit_idx
+        matches += 8 - ((decoded ^ byte) & 0xFF).bit_count()
+
+    return matches
+
+
 def score_condition(condition: Condition, config: SamplerConfig, frames: int = DEFAULT_FRAMES) -> ConditionScore:
     passed = sum(1 for frame_idx in range(frames) if frame_passes(condition, config, frame_idx))
     return ConditionScore(condition.name, condition.split, passed, frames)
