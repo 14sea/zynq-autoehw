@@ -677,3 +677,49 @@ that random best-of-22k is a strong baseline when fitness is low-noise.
 - ❌ Beats-random: **decidably not — inverted.** Random > GA at z ≈ 2.1.
   The benchmark's fitness signal is no longer the suspect; the *search*
   (GA hyperparameters/structure for the expensive-eval regime) is.
+
+---
+
+## Graded-fitness board smoke — FIRST GRADED SILICON READBACK ✅ (2026-07-11)
+
+First board run of the graded datapath (`prereg_graded_board_smoke_v1.md`).
+RTL changed for the first time since M1 smoke #3 (graded_score[9:0] +
+UART_REG_GRADED_SCORE=0x38, commit a46a429) → full DFX rebuild (dfx_top.bit
+md5 `133b0087a344…`, DRC 0 err; critical-warning set identical to the
+board-verified 9fe5cd8 build incl. the known WNS baseline). Firmware
+`AUTOEHW_BOARD_GRADED_SMOKE_MODE` (10,688 B, verify-image OK). Board leg:
+auto-booted Buildroot → SLCR reset → U-Boot → FCLK0 pinned 50 MHz (was 125
+again) → loadb OK, first roll.
+
+### Result: page 9 carousel == oracle, checker PASS
+
+12-word carousel (A7 marker + C0 header 0x09000A + 8 vector payloads +
+graded-sum word + C2 checksum), two full cycles captured, plain distinct
+poll. `host/check_graded_mailbox.py` **PASS** on the raw trace.
+
+Gatekeeper hand-decode of all 8 vectors — board MMIO graded score vs Python
+oracle `frame_bit_matches`:
+
+| vec | condition/frame | genome | board hard/graded | oracle | |
+|---|---|---|---|---|---|
+| 0 | T0v2 f0 | 0x60894268a2 | 0 / 262 | 262 | ✓ |
+| 1 | T1v2 f3 | 0x6a8ba845d4 | 0 / 261 | 261 | ✓ |
+| 2 | T2v2 f5 | 0x09571273ce | 0 / 232 | 232 | ✓ |
+| 3 | T3v2 f7 | 0x08d590f3ee | 0 / 268 | 268 | ✓ |
+| 4 | H0v2 f1 | 0x4e85cbc206 | 0 / 327 | 327 | ✓ |
+| 5 | H1v2 f7 | 0x6cbfb15fd8 | 0 / 352 | 352 | ✓ |
+| 6 | H2v2 f2 | 0x60894268a2 | 0 / 188 | 188 | ✓ |
+| 7 | H3v2 f4 | 0x6a8ba845d4 | 0 / 377 | 377 | ✓ |
+
+**All four golden layers now bit-exact: Python oracle == C twin == RTL sim ==
+board MMIO readback.** The graded scores span 188–377 (of 264–456 total bits
+per frame), confirming real dynamic range on silicon, while every hard pass
+bit is 0 — exactly the cliff-vs-gradient contrast the graded route exists to
+exploit.
+
+### Scope
+
+Plumbing smoke only: no search, no Set A screening, Set B sealed. Next per
+prereg boundary: graded search-arm firmware + Set A screening on the graded
+signal (host first), then — if a variant finally passes the gate — the Set B
+confirmatory board run.
