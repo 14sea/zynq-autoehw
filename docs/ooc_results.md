@@ -187,3 +187,30 @@ unsigned remainder. That removes the ambiguity *and* fits the pblock. A 2^k-scal
 rework would also shrink it but would change the numbers and force a golden
 re-baseline — not preferred. (If a bigger footprint is truly needed, the RP pblock
 could be enlarged, but keeping the RM ≤4400 LUT is the clean path.)
+
+---
+
+## Graded-fitness RTL/MMIO plumbing (commit a46a429) — OOC PASS (gatekeeper run 2026-07-11)
+
+All three OOC gates re-run with the graded score datapath
+(`graded_score[9:0]` popcount+accumulator sharing the hard-compare XOR,
+`UART_REG_GRADED_SCORE=0x38` readback): **0 errors / 0 critical warnings**
+on `xc7z010clg400-1`.
+
+| module | pre-graded (compact-modulo era) | with graded (a46a429) |
+|---|---|---|
+| `uart_stream_eval_core` | ~4100* | 4144 LUT / 758 FF / 4 DSP |
+| `uart_stream_island_regs` | — | 4256 LUT / 886 FF / 4 DSP |
+| `tpu_rp` (the RM) | 4223 LUT | **4266 LUT** / 929 FF / 4 DSP |
+
+*eval_core standalone wasn't re-recorded in the compact-modulo entry; delta
+derived from the RM: **graded costs ≈ +43 LUT (+1%)** — the datapath-sharing
+approach worked as intended (the accumulator reuses the existing
+decoded^source XOR; only the popcount tree and 10-bit register are new).
+
+**Fit assessment:** RM 4266 LUT < 4400 LUT6 envelope of the *original*
+quadrant pblock, and comfortably inside the current tracked pblock
+(`rtl/dfx/pblock_rp.xdc`, full right half = 2200 slices = 8800 LUT6).
+Slice-packing pressure is essentially unchanged from the board-proven
+smoke-#3 build (FF count +~60). No DFX rebuild risk indicated. Board-facing
+firmware/golden prereg may proceed.
