@@ -863,6 +863,29 @@ class UartStreamV2HeadroomTest(unittest.TestCase):
         )
         self.assertEqual(check.stdout.strip(), "PASS")
 
+    def test_board_host_v9_confirm_smoke_matches_golden(self):
+        if not BOARD.exists() or not V2_C_TWIN.exists():
+            self.skipTest("board host CLI or v2 C twin not built")
+        proc = subprocess.run(
+            [str(BOARD), "--v9-confirm-smoke"],
+            cwd=ROOT,
+            check=True,
+            text=True,
+            capture_output=True,
+        )
+        words = [int(line, 16) for line in proc.stdout.strip().splitlines()]
+        self.assertEqual(words[:2], [0xA7000000, 0xAD00B17D])
+        self.assertEqual(len(words), 128)
+        check = subprocess.run(
+            ["python3", "host/check_v9_confirm_mailbox.py", "--cli", str(V2_C_TWIN)],
+            cwd=ROOT,
+            input=proc.stdout,
+            check=True,
+            text=True,
+            capture_output=True,
+        )
+        self.assertEqual(check.stdout.strip(), "PASS")
+
 
 if __name__ == "__main__":
     unittest.main()
