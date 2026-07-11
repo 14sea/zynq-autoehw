@@ -17,6 +17,7 @@ from sim.uart_stream_v2 import (
     graded_score_condition,
     graded_score_split,
     graded_score_split_total,
+    graded_train_score,
     score_set,
     conditions_for,
 )
@@ -349,6 +350,49 @@ class UartStreamV2HeadroomTest(unittest.TestCase):
                 sum(score.frames for score in holdout.conditions),
             ), variant)
 
+    def test_c_twin_matches_python_v8_graded_variants(self):
+        if not V2_C_TWIN.exists():
+            self.skipTest(f"v2 C twin not built: {V2_C_TWIN}")
+        budget = 96
+        train_frames = 2
+        holdout_frames = 4
+        seed = 0x58BE
+        for variant in ("pbil_graded_v8", "pbil_island4_graded_v8", "pbil_island4_deep_graded_v8"):
+            result = variant_arm_train_only(variant, budget, seed, train_frames)
+            holdout = score_set("holdout", result.best_genome, holdout_frames)
+            graded_holdout = graded_score_split("holdout", result.best_genome, holdout_frames)
+            graded_holdout_total = graded_score_split_total("holdout", holdout_frames)
+            proc = subprocess.run(
+                [str(V2_C_TWIN), "variant-graded", variant, str(budget), hex(seed), str(train_frames), str(holdout_frames)],
+                cwd=ROOT,
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            lines = proc.stdout.strip().splitlines()
+            fields = lines[0].split()
+            graded_fields = lines[1].split()
+            self.assertEqual(int(fields[2], 16), encode_genome(result.best_genome), variant)
+            if variant == "pbil_island4_deep_graded_v8":
+                expected_train = graded_train_score(result.best_genome, 256)
+                expected_train_total = graded_score_split_total("train", 256)
+            else:
+                expected_train = graded_train_score(result.best_genome, train_frames)
+                expected_train_total = graded_score_split_total("train", train_frames)
+            self.assertEqual((int(fields[12]), int(fields[13])), (
+                expected_train,
+                expected_train_total,
+            ), variant)
+            self.assertEqual((int(fields[15]), int(fields[16])), (
+                sum(score.passed for score in holdout.conditions),
+                sum(score.frames for score in holdout.conditions),
+            ), variant)
+            self.assertEqual(graded_fields[0], "graded_holdout")
+            self.assertEqual((int(graded_fields[1]), int(graded_fields[2])), (
+                graded_holdout,
+                graded_holdout_total,
+            ), variant)
+
     def test_c_twin_matches_python_v4_landscape_kernels(self):
         if not V2_C_TWIN.exists():
             self.skipTest(f"v2 C twin not built: {V2_C_TWIN}")
@@ -553,6 +597,55 @@ class UartStreamV2HeadroomTest(unittest.TestCase):
         for row in report["variants"]["pbil_island4_deep_v7"]["rows"]:
             self.assertEqual(row["variant_budget"], 224)
             self.assertEqual(row["random_budget"], 240)
+
+    def test_v8_graded_screening_script_smoke(self):
+        if not V2_C_TWIN.exists():
+            self.skipTest(f"v2 C twin not built: {V2_C_TWIN}")
+        proc = subprocess.run(
+            [
+                "python3",
+                "host/screen_v8_graded_search.py",
+                "--cli",
+                str(V2_C_TWIN),
+                "--budget",
+                "96",
+                "--deep-budget",
+                "80",
+                "--train-frames",
+                "2",
+                "--holdout-frames",
+                "4",
+                "--seeds",
+                "0x1357,0x2468",
+                "--variants",
+                "pbil_graded_v8,pbil_island4_graded_v8,pbil_island4_deep_graded_v8,pbil_island4_v6",
+                "--jobs",
+                "2",
+                "--json",
+            ],
+            cwd=ROOT,
+            check=True,
+            text=True,
+            capture_output=True,
+        )
+        report = json.loads(proc.stdout)
+        self.assertEqual(report["protocol"], "prereg_search_v8_graded")
+        self.assertEqual(report["primary_gate"], "hard_holdout_delta")
+        self.assertEqual(report["secondary_metric"], "graded_holdout_delta")
+        self.assertEqual(report["budget"], 96)
+        self.assertEqual(report["deep_budget"], 80)
+        self.assertEqual(set(report["variants"].keys()), {
+            "pbil_graded_v8",
+            "pbil_island4_graded_v8",
+            "pbil_island4_deep_graded_v8",
+            "pbil_island4_v6",
+        })
+        for row in report["variants"]["pbil_island4_deep_graded_v8"]["rows"]:
+            self.assertEqual(row["variant_budget"], 80)
+            self.assertEqual(row["random_budget"], 96)
+        for data in report["variants"].values():
+            self.assertIn("hard_holdout_summary", data)
+            self.assertIn("graded_holdout_summary", data)
 
     def test_graded_smoke_script_writes_fixture(self):
         out = ROOT / "build" / "host" / "graded_smoke_fixture.json"

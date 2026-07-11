@@ -54,6 +54,11 @@ typedef struct {
     int order;
 } scored_genome_t;
 
+typedef enum {
+    TRAIN_SCORE_HARD = 0,
+    TRAIN_SCORE_GRADED = 1,
+} train_score_mode_t;
+
 static int streq(const char *a, const char *b) {
     while (*a && *b && *a == *b) {
         a++;
@@ -98,6 +103,22 @@ static int train_total_for_frames(int frames) {
         }
     }
     return count * frames;
+}
+
+static int train_total_for_mode(int frames, train_score_mode_t mode) {
+    int total = 0;
+    if (mode == TRAIN_SCORE_GRADED) {
+        (void)uart_v2_graded_score_split("train", k_static_baseline, frames, &total);
+        return total;
+    }
+    return train_total_for_frames(frames);
+}
+
+static int score_train_mode(uart_sampler_genome_v2_t genome, int frames, int *total, train_score_mode_t mode) {
+    if (mode == TRAIN_SCORE_GRADED) {
+        return uart_v2_graded_score_split("train", genome, frames, total);
+    }
+    return uart_v2_score_split("train", genome, frames, total);
 }
 
 static void sort_scored_desc(scored_genome_t *items, int count) {
@@ -338,6 +359,7 @@ static int v4_initial_pool(
     uint16_t *state,
     int budget,
     int frames,
+    train_score_mode_t mode,
     uart_sampler_genome_v2_t *best_genome,
     int *best_passed,
     scored_genome_t *scored
@@ -349,7 +371,7 @@ static int v4_initial_pool(
     for (int order = 0; order < pool_count; order++) {
         int total = 0;
         scored[order].genome = uart_v2_random_genome(state);
-        scored[order].passed = uart_v2_score_split("train", scored[order].genome, frames, &total);
+        scored[order].passed = score_train_mode(scored[order].genome, frames, &total, mode);
         scored[order].order = order;
         if (scored[order].passed > *best_passed) {
             *best_genome = scored[order].genome;
@@ -673,7 +695,7 @@ uart_stream_v2_arm_result_t uart_v2_bitflip1_topdecile_v4_arm_train_only(int bud
         return result;
     }
 
-    used = v4_initial_pool(&state, budget, frames, &result.best_genome, &best_passed, scored);
+    used = v4_initial_pool(&state, budget, frames, TRAIN_SCORE_HARD, &result.best_genome, &best_passed, scored);
     result.best_train_passed = best_passed;
     result.train_total = train_total_for_frames(frames);
     result.evals = used * result.train_total;
@@ -710,7 +732,8 @@ static uart_stream_v2_arm_result_t pbil_arm_train_only(
     int mutation_shift,
     int min_q15,
     int max_q15,
-    int restart_checkpoint
+    int restart_checkpoint,
+    train_score_mode_t mode
 ) {
     uint16_t state = seed;
     scored_genome_t scored[V4_INIT_POOL];
@@ -727,9 +750,9 @@ static uart_stream_v2_arm_result_t pbil_arm_train_only(
         return result;
     }
 
-    used = v4_initial_pool(&state, budget, frames, &result.best_genome, &best_passed, scored);
+    used = v4_initial_pool(&state, budget, frames, mode, &result.best_genome, &best_passed, scored);
     result.best_train_passed = best_passed;
-    result.train_total = train_total_for_frames(frames);
+    result.train_total = train_total_for_mode(frames, mode);
     result.evals = used * result.train_total;
     pbil_probabilities_from_elites(scored, used, V4_INIT_ELITES, min_q15, max_q15, probabilities);
     order = used;
@@ -743,7 +766,7 @@ static uart_stream_v2_arm_result_t pbil_arm_train_only(
         for (int idx = 0; idx < pbil_count; idx++) {
             int candidate_total = 0;
             batch[idx].genome = pbil_sample(&state, probabilities);
-            batch[idx].passed = uart_v2_score_split("train", batch[idx].genome, frames, &candidate_total);
+            batch[idx].passed = score_train_mode(batch[idx].genome, frames, &candidate_total, mode);
             batch[idx].order = order;
             result.evals += candidate_total;
             if (batch[idx].passed > best_passed) {
@@ -773,7 +796,7 @@ static uart_stream_v2_arm_result_t pbil_arm_train_only(
             int candidate_passed;
 
             (void)uart_v2_landscape_child("bitflip_1", &state, result.best_genome, &genome);
-            candidate_passed = uart_v2_score_split("train", genome, frames, &candidate_total);
+            candidate_passed = score_train_mode(genome, frames, &candidate_total, mode);
             result.evals += candidate_total;
             if (candidate_passed >= best_passed) {
                 best_passed = candidate_passed;
@@ -814,7 +837,27 @@ uart_stream_v2_arm_result_t uart_v2_pbil_eda_v4_arm_train_only(int budget, uint1
         V4_PBIL_MUTATION_SHIFT,
         V4_PBIL_MIN_Q15,
         V4_PBIL_MAX_Q15,
-        0
+        0,
+        TRAIN_SCORE_HARD
+    );
+}
+
+uart_stream_v2_arm_result_t uart_v2_pbil_graded_v8_arm_train_only(int budget, uint16_t seed, int frames) {
+    return pbil_arm_train_only(
+        "pbil_graded_v8",
+        budget,
+        seed,
+        frames,
+        V4_PBIL_BATCH,
+        V4_PBIL_BATCH,
+        0,
+        V4_PBIL_ELITES,
+        V4_PBIL_LEARNING_SHIFT,
+        V4_PBIL_MUTATION_SHIFT,
+        V4_PBIL_MIN_Q15,
+        V4_PBIL_MAX_Q15,
+        0,
+        TRAIN_SCORE_GRADED
     );
 }
 
@@ -832,7 +875,8 @@ uart_stream_v2_arm_result_t uart_v2_pbil_stable_v5_arm_train_only(int budget, ui
         V5_PBIL_MUTATION_SHIFT,
         V5_PBIL_MIN_Q15,
         V5_PBIL_MAX_Q15,
-        0
+        0,
+        TRAIN_SCORE_HARD
     );
 }
 
@@ -850,7 +894,8 @@ uart_stream_v2_arm_result_t uart_v2_pbil_restart_v5_arm_train_only(int budget, u
         V5_PBIL_MUTATION_SHIFT,
         V5_PBIL_MIN_Q15,
         V5_PBIL_MAX_Q15,
-        V5_PBIL_RESTART_CHECKPOINT
+        V5_PBIL_RESTART_CHECKPOINT,
+        TRAIN_SCORE_HARD
     );
 }
 
@@ -868,7 +913,8 @@ uart_stream_v2_arm_result_t uart_v2_pbil_hybrid_v5_arm_train_only(int budget, ui
         V5_PBIL_MUTATION_SHIFT,
         V5_PBIL_MIN_Q15,
         V5_PBIL_MAX_Q15,
-        0
+        0,
+        TRAIN_SCORE_HARD
     );
 }
 
@@ -877,7 +923,13 @@ static uint16_t island_seed(uint16_t seed, int island) {
     return derived == 0 ? 0xACE1u : derived;
 }
 
-static uart_stream_v2_arm_result_t pbil_island_v6_arm_train_only(int budget, uint16_t seed, int frames, int islands) {
+static uart_stream_v2_arm_result_t pbil_island_v6_arm_train_only(
+    int budget,
+    uint16_t seed,
+    int frames,
+    int islands,
+    train_score_mode_t mode
+) {
     uart_stream_v2_arm_result_t result = make_empty_result();
     int best_train_passed = -1;
 
@@ -892,7 +944,9 @@ static uart_stream_v2_arm_result_t pbil_island_v6_arm_train_only(int budget, uin
         if (island_budget <= 0) {
             continue;
         }
-        candidate = uart_v2_pbil_eda_v4_arm_train_only(island_budget, island_seed(seed, island), frames);
+        candidate = mode == TRAIN_SCORE_GRADED ?
+            uart_v2_pbil_graded_v8_arm_train_only(island_budget, island_seed(seed, island), frames) :
+            uart_v2_pbil_eda_v4_arm_train_only(island_budget, island_seed(seed, island), frames);
         result.evals += candidate.evals;
         if (candidate.best_train_passed > best_train_passed) {
             best_train_passed = candidate.best_train_passed;
@@ -906,21 +960,26 @@ static uart_stream_v2_arm_result_t pbil_island_v6_arm_train_only(int budget, uin
 }
 
 uart_stream_v2_arm_result_t uart_v2_pbil_island2_v6_arm_train_only(int budget, uint16_t seed, int frames) {
-    return pbil_island_v6_arm_train_only(budget, seed, frames, 2);
+    return pbil_island_v6_arm_train_only(budget, seed, frames, 2, TRAIN_SCORE_HARD);
 }
 
 uart_stream_v2_arm_result_t uart_v2_pbil_island3_v6_arm_train_only(int budget, uint16_t seed, int frames) {
-    return pbil_island_v6_arm_train_only(budget, seed, frames, 3);
+    return pbil_island_v6_arm_train_only(budget, seed, frames, 3, TRAIN_SCORE_HARD);
 }
 
 uart_stream_v2_arm_result_t uart_v2_pbil_island4_v6_arm_train_only(int budget, uint16_t seed, int frames) {
-    return pbil_island_v6_arm_train_only(budget, seed, frames, 4);
+    return pbil_island_v6_arm_train_only(budget, seed, frames, 4, TRAIN_SCORE_HARD);
+}
+
+uart_stream_v2_arm_result_t uart_v2_pbil_island4_graded_v8_arm_train_only(int budget, uint16_t seed, int frames) {
+    return pbil_island_v6_arm_train_only(budget, seed, frames, 4, TRAIN_SCORE_GRADED);
 }
 
 static int pbil_island4_results(
     int budget,
     uint16_t seed,
     int frames,
+    train_score_mode_t mode,
     uart_stream_v2_arm_result_t *results
 ) {
     enum { ISLANDS = 4 };
@@ -931,7 +990,9 @@ static int pbil_island4_results(
         if (island_budget <= 0) {
             continue;
         }
-        results[count] = uart_v2_pbil_eda_v4_arm_train_only(island_budget, island_seed(seed, island), frames);
+        results[count] = mode == TRAIN_SCORE_GRADED ?
+            uart_v2_pbil_graded_v8_arm_train_only(island_budget, island_seed(seed, island), frames) :
+            uart_v2_pbil_eda_v4_arm_train_only(island_budget, island_seed(seed, island), frames);
         count++;
     }
     return count;
@@ -949,7 +1010,7 @@ uart_stream_v2_arm_result_t uart_v2_pbil_island4_deep_v7_arm_train_only(int budg
         return result;
     }
 
-    count = pbil_island4_results(budget, seed, frames, islands);
+    count = pbil_island4_results(budget, seed, frames, TRAIN_SCORE_HARD, islands);
     for (int island = 0; island < count; island++) {
         int total = 0;
         int deep_passed = uart_v2_score_split(
@@ -988,7 +1049,7 @@ uart_stream_v2_arm_result_t uart_v2_pbil_island4_margin_v7_arm_train_only(int bu
         return result;
     }
 
-    count = pbil_island4_results(budget, seed, frames, islands);
+    count = pbil_island4_results(budget, seed, frames, TRAIN_SCORE_HARD, islands);
     if (count <= 0) {
         return result;
     }
@@ -1034,6 +1095,43 @@ uart_stream_v2_arm_result_t uart_v2_pbil_island4_margin_v7_arm_train_only(int bu
     return result;
 }
 
+uart_stream_v2_arm_result_t uart_v2_pbil_island4_deep_graded_v8_arm_train_only(int budget, uint16_t seed, int frames) {
+    enum { ISLANDS = 4 };
+    uart_stream_v2_arm_result_t islands[ISLANDS];
+    uart_stream_v2_arm_result_t result = make_empty_result();
+    int count;
+    int best_deep = -1;
+    int deep_total = 0;
+
+    if (budget <= 0) {
+        return result;
+    }
+
+    count = pbil_island4_results(budget, seed, frames, TRAIN_SCORE_GRADED, islands);
+    for (int island = 0; island < count; island++) {
+        int total = 0;
+        int deep_score = uart_v2_graded_score_split(
+            "train",
+            islands[island].best_genome,
+            V7_DEEP_SELECTION_FRAMES,
+            &total
+        );
+        result.evals += islands[island].evals + total;
+        if (deep_score > best_deep) {
+            best_deep = deep_score;
+            deep_total = total;
+            result.best_genome = islands[island].best_genome;
+            result.best_train_passed = deep_score;
+            result.train_total = total;
+        }
+    }
+    if (result.train_total == 0) {
+        result.train_total = deep_total;
+    }
+    finalize_holdout(&result, frames);
+    return result;
+}
+
 uart_stream_v2_arm_result_t uart_v2_variant_arm_train_holdout(
     const char *variant,
     int budget,
@@ -1074,6 +1172,12 @@ uart_stream_v2_arm_result_t uart_v2_variant_arm_train_holdout(
         result = uart_v2_pbil_island4_deep_v7_arm_train_only(budget, seed, train_frames);
     } else if (streq(variant, "pbil_island4_margin_v7")) {
         result = uart_v2_pbil_island4_margin_v7_arm_train_only(budget, seed, train_frames);
+    } else if (streq(variant, "pbil_graded_v8")) {
+        result = uart_v2_pbil_graded_v8_arm_train_only(budget, seed, train_frames);
+    } else if (streq(variant, "pbil_island4_graded_v8")) {
+        result = uart_v2_pbil_island4_graded_v8_arm_train_only(budget, seed, train_frames);
+    } else if (streq(variant, "pbil_island4_deep_graded_v8")) {
+        result = uart_v2_pbil_island4_deep_graded_v8_arm_train_only(budget, seed, train_frames);
     } else if (streq(variant, "random")) {
         result = uart_v2_random_arm_train_only(budget, seed, train_frames);
     } else {

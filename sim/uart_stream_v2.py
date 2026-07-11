@@ -296,6 +296,10 @@ def graded_score_split_total(split: str, frames: int = DEFAULT_FRAMES) -> int:
     return sum((condition.packet_len + 1) * 8 * frames for condition in conditions_for(split))
 
 
+def graded_train_score(genome: SamplerGenomeV2, frames: int = DEFAULT_FRAMES) -> int:
+    return graded_score_split("train", genome, frames)
+
+
 def random_arm_train_only(budget: int, seed: int, frames: int = DEFAULT_FRAMES) -> ArmResult:
     if budget <= 0:
         raise ValueError("budget must be positive")
@@ -459,6 +463,7 @@ def _v4_initial_pool(
     state: int,
     budget: int,
     frames: int,
+    score_fn=train_passed,
 ) -> tuple[int, int, SamplerGenomeV2, int, list[tuple[int, int, SamplerGenomeV2]]]:
     pool_count = min(V4_INIT_POOL, budget)
     scored: list[tuple[int, int, SamplerGenomeV2]] = []
@@ -466,7 +471,7 @@ def _v4_initial_pool(
     best_passed = -1
     for order in range(pool_count):
         state, genome = random_genome(state)
-        passed = train_passed(genome, frames)
+        passed = score_fn(genome, frames)
         scored.append((passed, order, genome))
         if passed > best_passed:
             best_genome = genome
@@ -563,12 +568,14 @@ def _pbil_arm_train_only(
     min_q15: int,
     max_q15: int,
     restart_checkpoint: int = 0,
+    score_fn=train_passed,
+    score_total_fn=lambda frames: len(conditions_for("train")) * frames,
 ) -> ArmResult:
     if budget <= 0:
         raise ValueError("budget must be positive")
     state = seed & 0xFFFF
-    total = len(conditions_for("train")) * frames
-    state, used, best_genome, best_passed, scored = _v4_initial_pool(state, budget, frames)
+    total = score_total_fn(frames)
+    state, used, best_genome, best_passed, scored = _v4_initial_pool(state, budget, frames, score_fn)
     probabilities = _pbil_probabilities_from_elites(scored, V4_INIT_ELITES, min_q15, max_q15)
     order = used
     checkpoint_best = best_passed
@@ -580,7 +587,7 @@ def _pbil_arm_train_only(
         batch: list[tuple[int, int, SamplerGenomeV2]] = []
         for _idx in range(pbil_count):
             state, genome = _pbil_sample(state, probabilities)
-            passed = train_passed(genome, frames)
+            passed = score_fn(genome, frames)
             batch.append((passed, order, genome))
             if passed > best_passed:
                 best_genome = genome
@@ -595,7 +602,7 @@ def _pbil_arm_train_only(
         refinements = min(refinement_count, budget - used)
         for _idx in range(refinements):
             state, genome = landscape_child("bitflip_1", state, best_genome)
-            passed = train_passed(genome, frames)
+            passed = score_fn(genome, frames)
             if passed >= best_passed:
                 best_genome = genome
                 best_passed = passed
@@ -626,6 +633,25 @@ def pbil_eda_v4_arm_train_only(budget: int, seed: int, frames: int = DEFAULT_FRA
         V4_PBIL_MUTATION_SHIFT,
         V4_PBIL_MIN_Q15,
         V4_PBIL_MAX_Q15,
+    )
+
+
+def pbil_graded_v8_arm_train_only(budget: int, seed: int, frames: int = DEFAULT_FRAMES) -> ArmResult:
+    return _pbil_arm_train_only(
+        "pbil_graded_v8",
+        budget,
+        seed,
+        frames,
+        V4_PBIL_BATCH,
+        V4_PBIL_BATCH,
+        0,
+        V4_PBIL_ELITES,
+        V4_PBIL_LEARNING_SHIFT,
+        V4_PBIL_MUTATION_SHIFT,
+        V4_PBIL_MIN_Q15,
+        V4_PBIL_MAX_Q15,
+        score_fn=graded_train_score,
+        score_total_fn=lambda local_frames: graded_score_split_total("train", local_frames),
     )
 
 
@@ -692,6 +718,7 @@ def pbil_island_v6_arm_train_only(
     budget: int,
     seed: int,
     frames: int = DEFAULT_FRAMES,
+    island_fn=pbil_eda_v4_arm_train_only,
 ) -> ArmResult:
     if budget <= 0:
         raise ValueError("budget must be positive")
@@ -704,7 +731,7 @@ def pbil_island_v6_arm_train_only(
         island_budget = budget // islands + (1 if island < (budget % islands) else 0)
         if island_budget <= 0:
             continue
-        result = pbil_eda_v4_arm_train_only(island_budget, _island_seed(seed, island), frames)
+        result = island_fn(island_budget, _island_seed(seed, island), frames)
         if result.best_fitness_train > best_fitness:
             best_genome = result.best_genome
             best_fitness = result.best_fitness_train
@@ -717,13 +744,14 @@ def _pbil_island_results(
     budget: int,
     seed: int,
     frames: int,
+    island_fn=pbil_eda_v4_arm_train_only,
 ) -> list[tuple[int, ArmResult]]:
     results: list[tuple[int, ArmResult]] = []
     for island in range(islands):
         island_budget = budget // islands + (1 if island < (budget % islands) else 0)
         if island_budget <= 0:
             continue
-        results.append((island, pbil_eda_v4_arm_train_only(island_budget, _island_seed(seed, island), frames)))
+        results.append((island, island_fn(island_budget, _island_seed(seed, island), frames)))
     return results
 
 
@@ -791,6 +819,37 @@ def pbil_island4_v6_arm_train_only(budget: int, seed: int, frames: int = DEFAULT
     return pbil_island_v6_arm_train_only("pbil_island4_v6", 4, budget, seed, frames)
 
 
+def pbil_island4_graded_v8_arm_train_only(budget: int, seed: int, frames: int = DEFAULT_FRAMES) -> ArmResult:
+    return pbil_island_v6_arm_train_only(
+        "pbil_island4_graded_v8",
+        4,
+        budget,
+        seed,
+        frames,
+        island_fn=pbil_graded_v8_arm_train_only,
+    )
+
+
+def pbil_island4_deep_graded_v8_arm_train_only(
+    budget: int,
+    seed: int,
+    frames: int = DEFAULT_FRAMES,
+    deep_frames: int = V7_DEEP_SELECTION_FRAMES,
+) -> ArmResult:
+    if budget <= 0:
+        raise ValueError("budget must be positive")
+    results = _pbil_island_results(4, budget, seed, frames, island_fn=pbil_graded_v8_arm_train_only)
+    best_genome = STATIC_BASELINE
+    best_deep = -1
+    total = graded_score_split_total("train", deep_frames)
+    for island, result in results:
+        deep_score = graded_train_score(result.best_genome, deep_frames)
+        if deep_score > best_deep:
+            best_genome = result.best_genome
+            best_deep = deep_score
+    return ArmResult("pbil_island4_deep_graded_v8", best_genome, best_deep / total, tuple())
+
+
 def variant_arm_train_only(variant: str, budget: int, seed: int, frames: int = DEFAULT_FRAMES) -> ArmResult:
     if variant == "current_hillclimb":
         result = ga_arm_train_only(budget, seed, frames)
@@ -821,6 +880,12 @@ def variant_arm_train_only(variant: str, budget: int, seed: int, frames: int = D
         return pbil_island4_deep_v7_arm_train_only(budget, seed, frames)
     if variant == "pbil_island4_margin_v7":
         return pbil_island4_margin_v7_arm_train_only(budget, seed, frames)
+    if variant == "pbil_graded_v8":
+        return pbil_graded_v8_arm_train_only(budget, seed, frames)
+    if variant == "pbil_island4_graded_v8":
+        return pbil_island4_graded_v8_arm_train_only(budget, seed, frames)
+    if variant == "pbil_island4_deep_graded_v8":
+        return pbil_island4_deep_graded_v8_arm_train_only(budget, seed, frames)
     if variant == "random":
         result = random_arm_train_only(budget, seed, frames)
         return ArmResult(variant, result.best_genome, result.best_fitness_train, result.generations)

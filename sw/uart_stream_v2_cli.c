@@ -128,6 +128,36 @@ int main(int argc, char **argv) {
         return 0;
     }
 
+    if (argc >= 2 && strcmp(argv[1], "variant-graded") == 0) {
+        if (argc != 7) {
+            fprintf(stderr, "usage: %s variant-graded <variant> <budget> <seed> <train_frames> <holdout_frames>\n", argv[0]);
+            return 2;
+        }
+        const char *variant = argv[2];
+        int budget = (int)parse_long(argv[3], "budget");
+        uint16_t seed = (uint16_t)parse_u64(argv[4], "seed");
+        int train_frames = (int)parse_long(argv[5], "train_frames");
+        int holdout_frames = (int)parse_long(argv[6], "holdout_frames");
+        int graded_holdout_total = 0;
+        int graded_holdout;
+        uart_stream_v2_arm_result_t result = uart_v2_variant_arm_train_holdout(
+            variant,
+            budget,
+            seed,
+            train_frames,
+            holdout_frames
+        );
+        print_arm(variant, result);
+        graded_holdout = uart_v2_graded_score_split(
+            "holdout",
+            result.best_genome,
+            holdout_frames,
+            &graded_holdout_total
+        );
+        printf("graded_holdout %d %d\n", graded_holdout, graded_holdout_total);
+        return 0;
+    }
+
     if (argc >= 2 && strcmp(argv[1], "landscape") == 0) {
         if (argc != 6) {
             fprintf(stderr, "usage: %s landscape <kernel> <parent_raw> <seed> <frames>\n", argv[0]);
@@ -165,7 +195,7 @@ int main(int argc, char **argv) {
 
     fprintf(
         stderr,
-        "usage: %s score <raw_genome> <frames> | graded <raw_genome> <frames> | ab <budget> <seed> <frames> | variant <variant> <budget> <seed> <train_frames> <holdout_frames> | landscape <kernel> <parent_raw> <seed> <frames>\n",
+        "usage: %s score <raw_genome> <frames> | graded <raw_genome> <frames> | ab <budget> <seed> <frames> | variant <variant> <budget> <seed> <train_frames> <holdout_frames> | variant-graded <variant> <budget> <seed> <train_frames> <holdout_frames> | landscape <kernel> <parent_raw> <seed> <frames>\n",
         argv[0]
     );
     return 2;
