@@ -685,7 +685,7 @@ that random best-of-22k is a strong baseline when fitness is low-noise.
 First board run of the graded datapath (`prereg_graded_board_smoke_v1.md`).
 RTL changed for the first time since M1 smoke #3 (graded_score[9:0] +
 UART_REG_GRADED_SCORE=0x38, commit a46a429) → full DFX rebuild (dfx_top.bit
-md5 `133b0087a344…`, DRC 0 err; critical-warning set identical to the
+md5 `06d6e91792a9…`, DRC 0 err; critical-warning set identical to the
 board-verified 9fe5cd8 build incl. the known WNS baseline). Firmware
 `AUTOEHW_BOARD_GRADED_SMOKE_MODE` (10,688 B, verify-image OK). Board leg:
 auto-booted Buildroot → SLCR reset → U-Boot → FCLK0 pinned 50 MHz (was 125
