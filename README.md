@@ -64,6 +64,8 @@ The M1 stack is a complete, evidence-bearing path from oracle to board:
 | [`docs/ooc_results.md`](docs/ooc_results.md) | Vivado OOC resource/fit gates and warnings. |
 | [`docs/prereg_search_v3.md`](docs/prereg_search_v3.md) ... [`docs/prereg_search_v9_graded_islands.md`](docs/prereg_search_v9_graded_islands.md) | Pre-registered screening plans. |
 | [`docs/screening_v3_results.md`](docs/screening_v3_results.md) ... [`docs/screening_v9_results.md`](docs/screening_v9_results.md) | Host screening results, including failed variants. |
+| [`docs/prereg_landscape_v4.md`](docs/prereg_landscape_v4.md), [`docs/landscape_v4_results.md`](docs/landscape_v4_results.md) | Fitness-landscape diagnostics: the measurement that redirected the search from hard pass/fail to the graded signal. |
+| [`docs/prereg_graded_fitness_v1.md`](docs/prereg_graded_fitness_v1.md) ... [`docs/graded_fitness_v1_gate.md`](docs/graded_fitness_v1_gate.md) | Graded-fitness revision chain: frozen score semantics, RTL/MMIO ABI, board-smoke preregistration, and gate records. |
 | [`docs/v9_setb_confirm_golden.md`](docs/v9_setb_confirm_golden.md) | Frozen host golden for the final Set B board confirmation. |
 
 The failed rounds are part of the result. The project intentionally records
