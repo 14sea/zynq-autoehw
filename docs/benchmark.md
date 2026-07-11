@@ -133,6 +133,12 @@ Concrete numeric bands (e.g. the "noise band" and static-baseline value) are
 recorded here as `uart_stream_v1.1`; M0 commits the *structure* and the *split*,
 which is what §M0 PASS requires.
 
+**M1 closure note.** The final M1 board claim is the equal-budget
+beats-random-on-holdout gate on the later `uart_stream_v2_headroom` package, not
+the full original Claim C bundle above. Static-baseline,
+adversarial/no-reward-hack, and broad generalization-gap claims remain future
+reporting axes unless a later section explicitly closes them.
+
 ---
 
 ## 5. Replay seeds and telemetry contract
@@ -378,3 +384,27 @@ frames per holdout condition (`holdout_total = 1024`). This addresses two
 board-observed failure modes: 4-frame holdout quantized GA and random into an
 apparent tie, and 4-frame train let GA overfit a tiny fixed train sample without
 holdout transfer.
+
+### v2 M1 closure
+
+The final M1 search arm is `pbil_island8_graded_v9`: eight PBIL islands trained
+on the graded score exposed by the board evaluator, with the final headline
+decision still made on hard CRC/pass holdout. It was chosen only after the
+pre-registered Set A screen in `docs/screening_v9_results.md` and confirmed once
+on sealed Set B (`search_seed=0xB17D`).
+
+Board confirmation (`docs/board_results.md`, commit `27bc3d1`):
+
+| Field | Value |
+|---|---|
+| measured v2 evals/sec | `1570` |
+| derived arm budget | `22078` candidates |
+| run duration | about 124 minutes |
+| random hard holdout | `15/1024` |
+| `pbil_island8_graded_v9` hard holdout | `128/1024` |
+| hard holdout delta | `+113/1024` |
+
+This closes the M1 beats-random gate for this benchmark/regime. It does not
+close Claim B, does not claim cross-benchmark transfer, and does not replace the
+remaining engineering tasks of NV champion storage and board-side replay-bundle
+emission.

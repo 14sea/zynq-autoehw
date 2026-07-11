@@ -1,12 +1,21 @@
-# zynq-autoehw — M0 Technical Report
+# zynq-autoehw — Technical Report
 
-Status: M0 planning/claims document. **Not a board claim.** Every board result
-in this repo will be recorded in `docs/board_results.md` once hardware work
-begins; nothing here asserts silicon behavior.
+Status: M0 claims contract plus M1 closure ledger. Board evidence is recorded in
+`docs/board_results.md`; this report summarizes what that evidence does and does
+not establish.
 
 This report is the M0 seed required by `zynq-ehw/docs/future_plan.md`. Its job is
 to make the *claims* defensible **before** any board-facing line opens, so that
 the new work cannot be confused with the already-completed `zynq-ehw` ladder.
+
+**M1 closure, 2026-07-11.** Commit `27bc3d1` closes the M1 beats-random gate on
+silicon for `uart_stream_v2_headroom` with graded train scoring and the frozen
+`pbil_island8_graded_v9` search arm. The confirmatory Set B run used the
+pre-registered seed `0xB17D`, derived its own board budget
+(`eps=1570`, `budget=22078` candidates), ran PC-free for about 124 minutes, and
+matched the host golden bit-for-bit. The hard holdout delta was `+113/1024`
+(`128/1024` vs random `15/1024`). This closes the M1 runtime/search gate, not
+Claim B and not a broad cross-benchmark generalization claim.
 
 ---
 
@@ -29,6 +38,14 @@ distribution?* That is a systems + generalization claim, not a mechanism claim.
 Each claim states what is asserted, what is explicitly **not** asserted, why it
 is distinct from `zynq-ehw`, and its falsification test. These mirror
 `future_plan.md` Claims M1/M2/M3 and are the contract M1+ milestones must honor.
+
+### M1 claim status as of commit `27bc3d1`
+
+| Claim | M1 status | Evidence | Scope boundary |
+|---|---|---|---|
+| **A — autonomous runtime** | **PASS for the M1 runtime core.** The board ran multi-hour autonomous search with PC out of candidate selection and fitness, board-derived budget, live heartbeat, bit-exact replay against host golden, rejection/recovery scaffolds, and no power-cycle dependency. | `docs/board_results.md` multi-hour, v2/v9, graded-smoke, and Set B confirmatory entries. | NV champion storage and board-side replay-bundle emission remain engineering remainders; existing persistence evidence is a static-shell RAM restore ABI plus host-side replay fixtures. |
+| **B — map-guided evolution** | **NOT TESTED in M1.** | None claimed. | Reserved for M2/local-map work. Current M1 result is search over a constrained genome, not a learned device-local map. |
+| **C — held-out improvement** | **PASS for the M1 beats-random holdout subclaim on one benchmark/regime.** The final pre-registered Set B board run beat equal-budget random on 1024-frame hard holdout by `+113/1024`. | `docs/prereg_search_v9_graded_islands.md`, `docs/screening_v9_results.md`, `docs/v9_setb_confirm_golden.md`, and `docs/board_results.md`. | The broad Claim C wording still requires careful scope: this is one UART-like benchmark family, one budget regime, and the winning condition was discovered as graded train signal + K=8 PBIL islands through v3-v9 screening. It is not a claim of cross-device, cross-task, or adversarial-set generalization. |
 
 ### Claim A — Autonomous runtime is new work
 
@@ -192,6 +209,14 @@ logs insufficient to reproduce the champion · PC still in the decision loop ·
 evals/sec too low for the convergence budget · evolution does not beat random
 search at equal budget · persistence writes unbounded / no wear budget.
 
+**Closure verdict at `27bc3d1`: PASS for the M1 runtime/search gate, with scoped
+remainders.** The board evidence satisfies the PC-free runtime, measured budget,
+long-run telemetry, equal-budget random baseline, hard-holdout win, deterministic
+host replay, and bad-candidate/recovery scaffold requirements. Champion restore
+across logic reset and host-side replay fixtures are demonstrated, but the
+non-volatile champion store and board-side replay-bundle emitter remain
+engineering items. Claim B is outside M1.
+
 ### M2 — cyclone-fabric-cartographer (separate repo)
 
 **PASS:** inherited `Cyclone_CRAM_Mapper` artifacts carry provenance +
@@ -260,22 +285,58 @@ composition lesson. These are **design constraints**, not debug notes.
   to overfit).
 - No modification of any sibling repo.
 
+## 6. M1 closure evidence
+
+The final result was not a single lucky board run. It was a pre-registered
+sequence of host screens, landscape diagnostics, RTL/board validation, and one
+sealed Set B confirmation run.
+
+| Step | Documents | Result |
+|---|---|---|
+| v3 hard-fitness screen | `docs/prereg_search_v3.md`, `docs/screening_v3_results.md` | All search variants lost to random; no board run. |
+| v4 landscape diagnosis | `docs/prereg_landscape_v4.md`, `docs/landscape_v4_results.md` | Hard local structure existed only in narrow regions; soft/graded signal was much stronger. |
+| v4-v7 hard-fitness search | `docs/prereg_search_v4.md` through `docs/prereg_search_v7.md`, matching screening results | PBIL and island variants improved median behavior but failed the pre-registered p10/win gates; no Set B use. |
+| Graded fitness path | `docs/prereg_graded_fitness_v1.md`, `docs/prereg_graded_rtl_v1.md`, `docs/graded_fitness_v1_gate.md`, `docs/ooc_results.md`, `docs/board_results.md` | Python, C, RTL simulation, OOC, and board MMIO readback all matched; graded output added only about 1% LUT. |
+| v8 graded screen | `docs/prereg_search_v8_graded.md`, `docs/screening_v8_results.md` | Graded signal improved the hard-holdout delta about 4.6x but missed p10 by `2/1024`; no board run. |
+| v9 graded K-islands | `docs/prereg_search_v9_graded_islands.md`, `docs/screening_v9_results.md` | `pbil_island8_graded_v9` passed all Set A gates and authorized Set B. |
+| Set B confirmation | `docs/v9_setb_confirm_golden.md`, `docs/board_results.md` | Single pre-registered board run with seed `0xB17D` passed mailbox-vs-golden, board-derived budget, and hard holdout delta `+113/1024`. |
+
+Honest scope:
+
+- The result is for `uart_stream_v2_headroom` under the measured M1 budget regime,
+  not for arbitrary EHW tasks.
+- The winning condition is the graded-fitness, K=8 PBIL-island search arm found
+  through the documented v3-v9 process; raw hard-fitness hill climbing and
+  earlier PBIL variants are explicitly falsified in this repo.
+- The Set B board run is a pre-registered single-seed confirmation of the
+  16-seed Set A evidence, not an independent large-sample replication study.
+- Claim B remains untested.
+
+Engineering remainder:
+
+- Implement true non-volatile champion storage with a named physical store and
+  enforced write budget.
+- Emit the replay bundle from the board side, not only from host fixtures.
+- Optionally clean up confirm-firmware bookkeeping that evaluated island-local
+  holdout data then discarded it for the frozen final-report ABI.
+
 ---
 
-## 6. M0 exit checklist
+## 7. M0 exit checklist (historical)
 
-M0 is review-clean when all are true:
+M0 passed before the first board-facing line. The checklist is kept here as the
+root contract M1 was measured against:
 
-- [ ] claims ledger present with per-claim non-claims + falsifiers (§1)
-- [ ] mandatory baselines enumerated (§2.1)
-- [ ] prior-art comparison covers Thompson, Whitley, CoBEA, prjxray, Cyclone,
+- [x] claims ledger present with per-claim non-claims + falsifiers (§1)
+- [x] mandatory baselines enumerated (§2.1)
+- [x] prior-art comparison covers Thompson, Whitley, CoBEA, prjxray, Cyclone,
       zynq-ehw (§2.2)
-- [ ] distinctness ledger separates new claims from EHW-2/3.4/5.x (§2.3)
-- [ ] milestone PASS/HOLD/KILL criteria recorded (§3)
-- [ ] `docs/benchmark.md` commits one benchmark with train/holdout/adversarial
+- [x] distinctness ledger separates new claims from EHW-2/3.4/5.x (§2.3)
+- [x] milestone PASS/HOLD/KILL criteria recorded (§3)
+- [x] `docs/benchmark.md` commits one benchmark with train/holdout/adversarial
       splits + thresholds + replay seeds + expected telemetry
-- [ ] `docs/schema.md` defines local-map / run-log / replay-bundle / whitelist /
+- [x] `docs/schema.md` defines local-map / run-log / replay-bundle / whitelist /
       blacklist / write-budget records, **each with a `schema_version`**
-- [ ] `docs/workflow.md` carries forward the two-AI process contract
-- [ ] a short external review pass (human or second model) finds no claim that
+- [x] `docs/workflow.md` carries forward the two-AI process contract
+- [x] a short external review pass (human or second model) finds no claim that
       collapses into already-done work
