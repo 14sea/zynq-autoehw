@@ -698,6 +698,29 @@ class UartStreamV2HeadroomTest(unittest.TestCase):
         )
         self.assertEqual(check.stdout.strip(), "PASS")
 
+    def test_board_host_graded_smoke_matches_oracle(self):
+        if not BOARD.exists():
+            self.skipTest(f"board host CLI not built: {BOARD}")
+        proc = subprocess.run(
+            [str(BOARD), "--graded-smoke"],
+            cwd=ROOT,
+            check=True,
+            text=True,
+            capture_output=True,
+        )
+        words = [int(line, 16) for line in proc.stdout.strip().splitlines()]
+        self.assertEqual(words[0], 0xA7000000)
+        self.assertEqual(len(words), 13)
+        check = subprocess.run(
+            ["python3", "host/check_graded_mailbox.py"],
+            cwd=ROOT,
+            input=proc.stdout,
+            check=True,
+            text=True,
+            capture_output=True,
+        )
+        self.assertEqual(check.stdout.strip(), "PASS")
+
 
 if __name__ == "__main__":
     unittest.main()

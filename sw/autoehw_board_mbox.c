@@ -42,6 +42,7 @@
 #define AUTOEHW_PAGE_ID_V2_GA_PROGRESS 6u
 #define AUTOEHW_PAGE_ID_V2_RANDOM_PROGRESS 7u
 #define AUTOEHW_PAGE_ID_V2_CALIBRATION 8u
+#define AUTOEHW_PAGE_ID_GRADED_SMOKE 9u
 #define AUTOEHW_LEGACY_WORD_COUNT 15u
 #define AUTOEHW_V2_AB_BUDGET 16
 #define AUTOEHW_V2_AB_FRAMES 4
@@ -66,6 +67,8 @@
 #define AUTOEHW_CHAMPION_STORE_VERSION 0x00010000u
 #define AUTOEHW_CHAMPION_STORE_SALT 0x9E3779B9u
 #define AUTOEHW_FRAMEBUF_STORE_BASE 0xF5000000u
+#define AUTOEHW_GRADED_SMOKE_VECTOR_COUNT 8u
+#define AUTOEHW_GRADED_SMOKE_PAYLOAD_COUNT 10u
 
 #ifdef AUTOEHW_HOST_STUB
 #include <stddef.h>
@@ -141,6 +144,23 @@ typedef struct {
     uint32_t write_counter;
     uint32_t write_budget;
 } champion_store_t;
+
+typedef struct {
+    int condition_idx;
+    uint64_t raw_genome;
+    int frame_idx;
+} graded_smoke_vector_t;
+
+static const graded_smoke_vector_t graded_smoke_vectors[AUTOEHW_GRADED_SMOKE_VECTOR_COUNT] = {
+    {0, 0x60894268A2ull, 0},
+    {1, 0x6A8BA845D4ull, 3},
+    {2, 0x09571273CEull, 5},
+    {3, 0x08D590F3EEull, 7},
+    {4, 0x4E85CBC206ull, 1},
+    {5, 0x6CBFB15FD8ull, 7},
+    {6, 0x60894268A2ull, 2},
+    {7, 0x6A8BA845D4ull, 4},
+};
 
 static uint32_t pack_config_payload(uart_sampler_config_t config) {
     return (((uint32_t)config.sample_phase & 0x1Fu) << 16) |
@@ -343,6 +363,51 @@ static int append_v2_calibration_page(
     payloads[7] = (AUTOEHW_V2_EPS_PROBE_CANDIDATES * AUTOEHW_V2_LONGRUN_TRAIN_EVALS_PER_CANDIDATE) & 0x003FFFFFu;
 
     return append_page(ev, idx, max_words, AUTOEHW_PAGE_ID_V2_CALIBRATION, payloads, payload_count);
+}
+
+static int eval_graded_smoke_vector(
+    void *ctx,
+    const graded_smoke_vector_t *vector,
+    autoehw_graded_eval_result_t *result
+) {
+    const uart_condition_t *condition = uart_v2_condition_at(vector->condition_idx);
+    uart_sampler_genome_v2_t genome = uart_v2_decode_genome(vector->raw_genome);
+
+    if (condition == 0 || result == 0) {
+        return 0;
+    }
+
+#ifdef AUTOEHW_HOST_STUB
+    {
+        uart_sampler_config_t config = uart_v2_effective_config(condition, genome);
+        result->hard_pass = uart_frame_passes(condition, config, vector->frame_idx);
+        result->graded_score = uart_frame_bit_matches(condition, config, vector->frame_idx);
+        result->graded_total = (condition->packet_len + 1) * 8;
+        (void)ctx;
+        return 1;
+    }
+#else
+    return autoehw_v2_mmio_eval_frame_graded(ctx, condition, genome, vector->frame_idx, result);
+#endif
+}
+
+static int append_graded_smoke_page(uint32_t *ev, int idx, int max_words, void *ctx) {
+    uint32_t payloads[AUTOEHW_GRADED_SMOKE_PAYLOAD_COUNT];
+    uint32_t graded_sum = 0;
+
+    payloads[0] = (0x09u << 16) | AUTOEHW_GRADED_SMOKE_VECTOR_COUNT;
+    for (int i = 0; i < (int)AUTOEHW_GRADED_SMOKE_VECTOR_COUNT; i++) {
+        autoehw_graded_eval_result_t result;
+        if (!eval_graded_smoke_vector(ctx, &graded_smoke_vectors[i], &result)) {
+            return idx;
+        }
+        graded_sum += (uint32_t)result.graded_score;
+        payloads[i + 1] = (((uint32_t)i & 0x0Fu) << 18) |
+                          (((uint32_t)result.hard_pass & 0x01u) << 17) |
+                          ((uint32_t)result.graded_score & 0x03FFu);
+    }
+    payloads[AUTOEHW_GRADED_SMOKE_PAYLOAD_COUNT - 1] = graded_sum & 0x003FFFFFu;
+    return append_page(ev, idx, max_words, AUTOEHW_PAGE_ID_GRADED_SMOKE, payloads, (int)AUTOEHW_GRADED_SMOKE_PAYLOAD_COUNT);
 }
 
 #if defined(AUTOEHW_HOST_STUB) || defined(AUTOEHW_BOARD_LONGRUN_MODE)
@@ -689,6 +754,19 @@ int autoehw_host_run_v2_ab_longrun_smoke(void) {
     }
     return 0;
 }
+
+int autoehw_host_run_graded_smoke(void) {
+    uint32_t ev[16];
+    int ev_count = 0;
+
+    reset_host_mailbox();
+    publish(MBOX_REACHED_MAIN);
+    ev_count = append_graded_smoke_page(ev, ev_count, (int)(sizeof(ev) / sizeof(ev[0])), 0);
+    for (int i = 0; i < ev_count; i++) {
+        publish(ev[i]);
+    }
+    return ev_count == 0 ? 1 : 0;
+}
 #endif
 
 int autoehw_board_main(void) {
@@ -698,6 +776,26 @@ int autoehw_board_main(void) {
 #else
     autoehw_mmio_ctx_t mmio = {(volatile uint32_t *)UART_ISLAND_BASE, 1000000u};
     autoehw_backend_t backend = {&mmio, autoehw_mmio_eval_frame};
+#endif
+
+#if defined(AUTOEHW_BOARD_GRADED_SMOKE_MODE) && !defined(AUTOEHW_HOST_STUB)
+    {
+        uint32_t ev[16];
+        int ev_count = 0;
+
+        ev[ev_count++] = MBOX_REACHED_MAIN;
+        publish(MBOX_REACHED_MAIN);
+        ev_count = append_graded_smoke_page(ev, ev_count, (int)(sizeof(ev) / sizeof(ev[0])), &mmio);
+        for (int i = 1; i < ev_count; i++) {
+            publish(ev[i]);
+        }
+        for (;;) {
+            for (int i = 0; i < ev_count; i++) {
+                MBOX = ev[i];
+                for (volatile uint32_t d = 0; d < 8000000u; d++) { }
+            }
+        }
+    }
 #endif
 
     champion_store_t champion_store = {0, {16, 0, 1}, 0, AUTOEHW_WRITE_BUDGET};
