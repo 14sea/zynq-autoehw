@@ -357,7 +357,13 @@ class UartStreamV2HeadroomTest(unittest.TestCase):
         train_frames = 2
         holdout_frames = 4
         seed = 0x58BE
-        for variant in ("pbil_graded_v8", "pbil_island4_graded_v8", "pbil_island4_deep_graded_v8"):
+        for variant in (
+            "pbil_graded_v8",
+            "pbil_island4_graded_v8",
+            "pbil_island4_deep_graded_v8",
+            "pbil_island6_graded_v9",
+            "pbil_island8_graded_v9",
+        ):
             result = variant_arm_train_only(variant, budget, seed, train_frames)
             holdout = score_set("holdout", result.best_genome, holdout_frames)
             graded_holdout = graded_score_split("holdout", result.best_genome, holdout_frames)
@@ -646,6 +652,49 @@ class UartStreamV2HeadroomTest(unittest.TestCase):
         for data in report["variants"].values():
             self.assertIn("hard_holdout_summary", data)
             self.assertIn("graded_holdout_summary", data)
+
+    def test_v9_graded_island_screening_script_smoke(self):
+        if not V2_C_TWIN.exists():
+            self.skipTest(f"v2 C twin not built: {V2_C_TWIN}")
+        proc = subprocess.run(
+            [
+                "python3",
+                "host/screen_v9_graded_islands.py",
+                "--cli",
+                str(V2_C_TWIN),
+                "--budget",
+                "96",
+                "--train-frames",
+                "2",
+                "--holdout-frames",
+                "4",
+                "--seeds",
+                "0x1357,0x2468",
+                "--variants",
+                "pbil_island6_graded_v9,pbil_island8_graded_v9,pbil_island4_graded_v8",
+                "--jobs",
+                "2",
+                "--json",
+            ],
+            cwd=ROOT,
+            check=True,
+            text=True,
+            capture_output=True,
+        )
+        report = json.loads(proc.stdout)
+        self.assertEqual(report["protocol"], "prereg_search_v9_graded_islands")
+        self.assertEqual(report["control"], "pbil_island4_graded_v8")
+        self.assertEqual(report["budget"], 96)
+        self.assertEqual(set(report["variants"].keys()), {
+            "pbil_island6_graded_v9",
+            "pbil_island8_graded_v9",
+            "pbil_island4_graded_v8",
+        })
+        self.assertTrue(report["variants"]["pbil_island4_graded_v8"]["hard_holdout_summary"]["control_only"])
+        for variant in ("pbil_island6_graded_v9", "pbil_island8_graded_v9"):
+            summary = report["variants"][variant]["hard_holdout_summary"]
+            self.assertIn("dilution_failed_vs_k4", summary)
+            self.assertIn("board_eligible", summary)
 
     def test_graded_smoke_script_writes_fixture(self):
         out = ROOT / "build" / "host" / "graded_smoke_fixture.json"

@@ -63,6 +63,8 @@ uart_stream_v2_arm_result_t uart_v2_pbil_island4_margin_v7_arm_train_only(int bu
 uart_stream_v2_arm_result_t uart_v2_pbil_graded_v8_arm_train_only(int budget, uint16_t seed, int frames);
 uart_stream_v2_arm_result_t uart_v2_pbil_island4_graded_v8_arm_train_only(int budget, uint16_t seed, int frames);
 uart_stream_v2_arm_result_t uart_v2_pbil_island4_deep_graded_v8_arm_train_only(int budget, uint16_t seed, int frames);
+uart_stream_v2_arm_result_t uart_v2_pbil_island6_graded_v9_arm_train_only(int budget, uint16_t seed, int frames);
+uart_stream_v2_arm_result_t uart_v2_pbil_island8_graded_v9_arm_train_only(int budget, uint16_t seed, int frames);
 uart_stream_v2_arm_result_t uart_v2_variant_arm_train_holdout(
     const char *variant,
     int budget,

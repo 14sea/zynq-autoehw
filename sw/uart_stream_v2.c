@@ -975,6 +975,14 @@ uart_stream_v2_arm_result_t uart_v2_pbil_island4_graded_v8_arm_train_only(int bu
     return pbil_island_v6_arm_train_only(budget, seed, frames, 4, TRAIN_SCORE_GRADED);
 }
 
+uart_stream_v2_arm_result_t uart_v2_pbil_island6_graded_v9_arm_train_only(int budget, uint16_t seed, int frames) {
+    return pbil_island_v6_arm_train_only(budget, seed, frames, 6, TRAIN_SCORE_GRADED);
+}
+
+uart_stream_v2_arm_result_t uart_v2_pbil_island8_graded_v9_arm_train_only(int budget, uint16_t seed, int frames) {
+    return pbil_island_v6_arm_train_only(budget, seed, frames, 8, TRAIN_SCORE_GRADED);
+}
+
 static int pbil_island4_results(
     int budget,
     uint16_t seed,
@@ -1176,6 +1184,10 @@ uart_stream_v2_arm_result_t uart_v2_variant_arm_train_holdout(
         result = uart_v2_pbil_graded_v8_arm_train_only(budget, seed, train_frames);
     } else if (streq(variant, "pbil_island4_graded_v8")) {
         result = uart_v2_pbil_island4_graded_v8_arm_train_only(budget, seed, train_frames);
+    } else if (streq(variant, "pbil_island6_graded_v9")) {
+        result = uart_v2_pbil_island6_graded_v9_arm_train_only(budget, seed, train_frames);
+    } else if (streq(variant, "pbil_island8_graded_v9")) {
+        result = uart_v2_pbil_island8_graded_v9_arm_train_only(budget, seed, train_frames);
     } else if (streq(variant, "pbil_island4_deep_graded_v8")) {
         result = uart_v2_pbil_island4_deep_graded_v8_arm_train_only(budget, seed, train_frames);
     } else if (streq(variant, "random")) {

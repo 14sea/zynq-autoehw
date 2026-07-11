@@ -830,6 +830,28 @@ def pbil_island4_graded_v8_arm_train_only(budget: int, seed: int, frames: int = 
     )
 
 
+def pbil_island6_graded_v9_arm_train_only(budget: int, seed: int, frames: int = DEFAULT_FRAMES) -> ArmResult:
+    return pbil_island_v6_arm_train_only(
+        "pbil_island6_graded_v9",
+        6,
+        budget,
+        seed,
+        frames,
+        island_fn=pbil_graded_v8_arm_train_only,
+    )
+
+
+def pbil_island8_graded_v9_arm_train_only(budget: int, seed: int, frames: int = DEFAULT_FRAMES) -> ArmResult:
+    return pbil_island_v6_arm_train_only(
+        "pbil_island8_graded_v9",
+        8,
+        budget,
+        seed,
+        frames,
+        island_fn=pbil_graded_v8_arm_train_only,
+    )
+
+
 def pbil_island4_deep_graded_v8_arm_train_only(
     budget: int,
     seed: int,
@@ -884,6 +906,10 @@ def variant_arm_train_only(variant: str, budget: int, seed: int, frames: int = D
         return pbil_graded_v8_arm_train_only(budget, seed, frames)
     if variant == "pbil_island4_graded_v8":
         return pbil_island4_graded_v8_arm_train_only(budget, seed, frames)
+    if variant == "pbil_island6_graded_v9":
+        return pbil_island6_graded_v9_arm_train_only(budget, seed, frames)
+    if variant == "pbil_island8_graded_v9":
+        return pbil_island8_graded_v9_arm_train_only(budget, seed, frames)
     if variant == "pbil_island4_deep_graded_v8":
         return pbil_island4_deep_graded_v8_arm_train_only(budget, seed, frames)
     if variant == "random":
