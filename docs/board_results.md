@@ -723,3 +723,55 @@ Plumbing smoke only: no search, no Set A screening, Set B sealed. Next per
 prereg boundary: graded search-arm firmware + Set A screening on the graded
 signal (host first), then — if a variant finally passes the gate — the Set B
 confirmatory board run.
+
+---
+
+## ★★★ v9 Set B CONFIRMATORY RUN — SUCCESS (2026-07-11): beats-random CONFIRMED on silicon
+
+The single-shot Set B confirmation of the frozen variant, per
+`prereg_search_v9_graded_islands.md` and `v9_setb_confirm_golden.md`.
+
+- Variant: `pbil_island8_graded_v9` (frozen after v9 Set A)
+- Seed: **0xB17D** (Set B; never used in any selection)
+- Firmware `AUTOEHW_BOARD_V9_CONFIRM_MODE` (15,968 B, verify-image OK);
+  bitstream rebuild md5 `4b823f543f67…` (RTL unchanged; warning set ==
+  baseline); FCLK0 50 MHz; loadb first roll; cadence probe GO (10.0 s).
+- Run: ~124 min PC-free, 836 heartbeat transitions, **0 stuck alerts,
+  0 serial errors**; final carousel (40 words) captured twice,
+  **byte-identical cycles**, positional reconstruction.
+
+### Verdict — all preregistered criteria met
+
+| criterion | required | board | |
+|---|---|---|---|
+| mailbox vs host golden | bit-exact | `check_v9_confirm_mailbox.py` **PASS** | ✓ |
+| graded speed probe → derived budget | board-measured | eps 1570 → budget **22,078** (=⌊1570×7200/512⌋) | ✓ |
+| hard holdout delta vs random | ≥ +8/1024 | **+113/1024** (128 vs 15) | ✓ |
+
+Gatekeeper hand-decode cross-check (independent of the checker): variant
+genome `0x7c009161b2` and random genome `0x06c219610c` match the host
+recompute at the board-derived budget 22,078 exactly; hard holdout packings
+(0x80400 = 128/1024, 0xF400 = 15/1024) and graded holdouts (382,336 vs
+332,459 of 385,024) all bit-exact. The champion at budget 22,078 is
+identical to the nominal-budget (22,387) golden — the search outcome is
+insensitive to the ~300-candidate budget difference, closing the
+budget-sensitivity risk noted before the run.
+
+### What this completes
+
+**M1's beats-random gating item is closed.** On this benchmark, at equal
+board-measured budget, on a preregistered fresh seed, the frozen
+graded-signal K=8-island PBIL search beats best-of-stream random search on
+the held-out hard metric — end-to-end on silicon, PC out of the loop,
+四-layer goldens equal (Python == C == RTL sim == board mailbox).
+
+Scope kept honest: one benchmark family, one budget regime; the search
+advantage is conditional on the graded train signal + K=8 configuration
+discovered through the nine preregistered screening rounds (v3–v9);
+single-seed confirmation is the preregistered spot-check of the 16-seed
+Set A evidence, not an independent large-sample replication. Claim B
+(map-guided evolution) and structural/bitstream evolution remain out of
+scope for M1.
+
+Full-M1 engineering remainder (unchanged): NV champion store, board-side
+replay bundle emission.
