@@ -50,8 +50,12 @@ architecture rtl of axil_framebuf is
 
   signal awready_r, wready_r, bvalid_r : std_logic := '0';
   signal arready_r, rvalid_r           : std_logic := '0';
-  signal rdata_r                       : std_logic_vector(31 downto 0) := (others => '0');
-  signal rd_data_r                     : std_logic_vector(31 downto 0) := (others => '0');
+  signal rdata_param_r                 : std_logic_vector(31 downto 0) := (others => '0');
+  signal rdata_store_r                 : std_logic_vector(31 downto 0) := (others => '0');
+  signal rsel_r                        : std_logic := '0';
+  signal rd_param_r                    : std_logic_vector(31 downto 0) := (others => '0');
+  signal rd_store_r                    : std_logic_vector(31 downto 0) := (others => '0');
+  signal rdsel_r                       : std_logic := '0';
 
   function low_index(addr : std_logic_vector(ADDR_BITS-1 downto 0)) return integer is
   begin
@@ -65,8 +69,8 @@ begin
   s_axi_arready <= arready_r;
   s_axi_rvalid  <= rvalid_r;
   s_axi_rresp   <= "00";
-  s_axi_rdata   <= rdata_r;
-  rd_data       <= rd_data_r;
+  s_axi_rdata   <= rdata_store_r when rsel_r = '1' else rdata_param_r;
+  rd_data       <= rd_store_r when rdsel_r = '1' else rd_param_r;
 
   -- write channel: accept aw+w together, write RAM, single bresp
   wr: process(s_axi_aclk)
@@ -117,11 +121,9 @@ begin
           arready_r <= '1';
           word_addr := s_axi_araddr(ADDR_BITS+1 downto 2);
           ri := low_index(word_addr);
-          if word_addr(ADDR_BITS-1) = '1' then
-            rdata_r <= store_ram(ri);
-          else
-            rdata_r <= param_ram(ri);
-          end if;
+          rdata_param_r <= param_ram(ri);
+          rdata_store_r <= store_ram(ri);
+          rsel_r        <= word_addr(ADDR_BITS-1);
           rvalid_r  <= '1';
         elsif (rvalid_r = '1' and s_axi_rready = '1') then
           rvalid_r <= '0';
@@ -136,11 +138,9 @@ begin
   begin
     if rising_edge(s_axi_aclk) then
       ri := low_index(rd_addr);
-      if rd_addr(ADDR_BITS-1) = '1' then
-        rd_data_r <= store_ram(ri);
-      else
-        rd_data_r <= param_ram(ri);
-      end if;
+      rd_param_r <= param_ram(ri);
+      rd_store_r <= store_ram(ri);
+      rdsel_r    <= rd_addr(ADDR_BITS-1);
     end if;
   end process;
 end architecture;

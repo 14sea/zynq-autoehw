@@ -949,6 +949,44 @@ class UartStreamV2HeadroomTest(unittest.TestCase):
         )
         self.assertEqual(verify.stdout.strip(), "PASS")
 
+        restore = subprocess.run(
+            [
+                "python3",
+                "host/m1_persist_framebuf_words.py",
+                "--from-store-hex",
+                str(store_path),
+            ],
+            cwd=ROOT,
+            check=True,
+            text=True,
+            capture_output=True,
+        )
+        restore_lines = restore.stdout.strip().splitlines()
+        self.assertEqual(len(restore_lines), 16)
+        self.assertEqual(restore_lines[0], "mw.l 0x40000000 0x43484d50")
+        self.assertEqual(restore_lines[1], "mw.l 0x40000004 0x00020000")
+        self.assertTrue(restore_lines[-1].startswith("mw.l 0x4000003c 0x"))
+
+        md_style_path = ROOT / "build" / "host" / "m1_store_words_md.txt"
+        raw_words = store_words.stdout.strip().splitlines()
+        md_style_path.write_text(
+            "40001000: " + " ".join(raw_words[:8]) + "\n" +
+            "40001020: " + " ".join(raw_words[8:16]) + "\n"
+        )
+        md_restore = subprocess.run(
+            [
+                "python3",
+                "host/m1_persist_framebuf_words.py",
+                "--from-store-hex",
+                str(md_style_path),
+            ],
+            cwd=ROOT,
+            check=True,
+            text=True,
+            capture_output=True,
+        )
+        self.assertEqual(md_restore.stdout, restore.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()

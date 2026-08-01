@@ -345,3 +345,19 @@ Nothing converts a flushed v2 store back into low-half restore words:
 `SamplerConfig`. Until that exists the NV round trip
 (store → `fatwrite` → power cycle → `fatload` → restore) cannot be closed on the
 board, which is the whole point of the addendum.
+
+### Round-3 follow-up submitted after OOC FAIL (pending OOC)
+
+The RTL follow-up applies probe D's rule directly: each RAM now has its own read
+output register (`param` and `store`), and the half-select mux is after those
+registers for both AXI and NEORV32 read ports. This should preserve the split
+topology while restoring the block-RAM inference template.
+
+The host restore gap is also closed at the tool level:
+`host/m1_persist_framebuf_words.py --from-store-hex <dump>` validates the v2
+store record checksum and emits low-half `mw.l 0x40000000 ...` restore words.
+That gives the board procedure a concrete bridge from the high-half
+board-written store dump to the low-half post-power-cycle restore input.
+
+GHDL behavioural smoke and `make all` pass locally. This remains **pending OOC**
+until Vivado confirms BRAM inference and resource use.
