@@ -611,3 +611,37 @@ U uart_v2_encode_genome
 This does not replace Claude's full NEORV32 link, but it shows the overflow
 cause has been removed from this translation unit: no PBIL/search/evaluator
 symbols remain live in STORE_DIGEST mode.
+
+### Round 6 (commit 93e0505) — **firmware links, DFX build PASS**
+
+Store-only mode fixed the overflow decisively: image **1 640 B** (was 34 652 B
+against a 32 768 B IMEM), `verify-image` OK, `image_size_c = 1640`.
+
+Full DFX build: **0 errors, 101 critical warnings** (the known-good count),
+routing completed with **0 failed nets**, `dfx_top.bit` 2 083 859 B
+md5 `2e6d7f0d5e0330729b71f17312ecd643`. Utilization 8 080 LUT (45.9 %),
+4 962 FF, **10.5 BRAM tiles**, LUT-as-Memory only 148 — the framebuf split kept
+its block RAM, as the OOC probe predicted.
+
+**Timing, and a correction to this repo's own lore.** WNS = **−19.394 ns**
+against the previously recorded −17 baseline. The worst path is
+
+```
+Source:      u_soc/wb_tpu_inst/u_island/eval_core/noise_state_reg[4]/C
+Destination: u_soc/wb_tpu_inst/u_island/eval_core/graded_score_reg[9]/D
+Logic Levels: 61 (CARRY4=36 LUT2=6 LUT3=7 LUT4=2 LUT5=1 LUT6=9)
+```
+
+i.e. entirely inside the pre-existing RM evaluation datapath — **none of the
+addendum's logic appears on it**, and the −17 → −19.4 delta is placement noise
+on that same old path. Recorded for the record: the note carried in project
+memory that this negative WNS comes from "the BD declaring FCLK high while we
+sign off at 50" is **wrong**. The clock summary shows `clk_fpga_0` constrained
+at exactly 20.000 ns / 50 MHz, and the path's data delay is 39.093 ns, so the
+violation is real against the constraint. What is genuinely established is
+empirical: this same path has produced bit-exact results for hours, across two
+different dice, at 50 MHz. Why it does is *not* explained anywhere in this repo
+— the likely reason is that the path is functionally multi-cycle (the island
+runs a start/busy/done handshake, ~31 µs per frame evaluation) with no
+multicycle constraint declared, but that has not been demonstrated. It should be
+investigated and constrained properly, separately from this drop.
