@@ -495,3 +495,34 @@ than trusting the match bit.
 
 **Gate decision:** no DFX build. Firmware does not compile for the board, and
 firmware is baked into the bitstream.
+
+### Round-5 follow-up submitted after board-compile/checker blocker (pending DFX)
+
+The firmware/checker follow-up addresses all three round-4 findings:
+
+- The two V9 helper guards now also include `AUTOEHW_BOARD_STORE_DIGEST_MODE`,
+  so `board_eval_frame_graded()` and the progress helper are visible in the
+  board STORE_DIGEST build.
+- The board STORE_DIGEST mode uses `AUTOEHW_V9_CONFIRM_SMOKE_BUDGET` and no
+  progress callback. The NV round trip tests store/flush/power-cycle/restore;
+  it must not re-run the full two-hour Set B confirm on every iteration.
+- `host/check_store_digest_mailbox.py --require-restore --expect-raw-from-store
+  <dump>` validates the v2 record checksum from the dumped store window and
+  compares mailbox payloads 9/10 against the stored raw genome. A recomputed
+  page checksum plus a forged `restored+matches` bit is no longer enough to
+  pass.
+
+The host unit test now includes that forged-payload negative control. The next
+gate should include a board-mode compile-only check for
+`AUTOEHW_BOARD_STORE_DIGEST_MODE`, then DFX and the physical 4203 NV round trip.
+
+Local follow-up gates:
+
+- `make all` PASS (44 tests plus RTL smoke).
+- `make framebuf-vhdl-smoke` PASS.
+- `cc -fsyntax-only -DNEORV32_H -DAUTOEHW_BOARD_STORE_DIGEST_MODE
+  -DAUTOEHW_NO_MAIN ... sw/autoehw_board_mbox.c` PASS, covering the board-only
+  STORE_DIGEST preprocessor path that host stub builds cannot see.
+- A full `riscv64-unknown-elf-gcc` compile was attempted but the installed
+  toolchain is missing standard newlib headers (`inttypes.h`), so that exact
+  cross-compile remains for Claude's board toolchain.

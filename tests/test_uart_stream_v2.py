@@ -3,6 +3,7 @@ import subprocess
 import unittest
 from pathlib import Path
 
+from sim.uart_stream_v1 import mailbox_page_checksum
 from sim.uart_stream_v2 import (
     BENCHMARK_ID,
     GENOME_BITS,
@@ -997,7 +998,13 @@ class UartStreamV2HeadroomTest(unittest.TestCase):
         roundtrip_words = [int(line, 16) for line in roundtrip.stdout.strip().splitlines()]
         self.assertEqual(roundtrip_words[0], 0xC00F000B)
         restore_check = subprocess.run(
-            ["python3", "host/check_store_digest_mailbox.py", "--require-restore"],
+            [
+                "python3",
+                "host/check_store_digest_mailbox.py",
+                "--require-restore",
+                "--expect-raw-from-store",
+                str(store_path),
+            ],
             cwd=ROOT,
             input=roundtrip.stdout,
             check=True,
@@ -1010,6 +1017,26 @@ class UartStreamV2HeadroomTest(unittest.TestCase):
         store_record = [int(line, 16) for line in store_words.stdout.strip().splitlines()[:16]]
         stored_raw = store_record[6] | (store_record[7] << 32)
         self.assertEqual(restored_raw, stored_raw)
+
+        tampered = roundtrip_words[:]
+        tampered[10] ^= 0x1
+        tampered_payloads = [word & 0x003FFFFF for word in tampered[1:12]]
+        tampered[12] = 0xC2000000 | mailbox_page_checksum(15, tuple(tampered_payloads))
+        tampered_check = subprocess.run(
+            [
+                "python3",
+                "host/check_store_digest_mailbox.py",
+                "--require-restore",
+                "--expect-raw-from-store",
+                str(store_path),
+            ],
+            cwd=ROOT,
+            input="\n".join(f"{word:08x}" for word in tampered) + "\n",
+            text=True,
+            capture_output=True,
+        )
+        self.assertNotEqual(tampered_check.returncode, 0)
+        self.assertIn("restored raw mismatch", tampered_check.stderr)
 
 
 if __name__ == "__main__":

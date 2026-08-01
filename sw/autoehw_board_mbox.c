@@ -599,7 +599,7 @@ static autoehw_search_result_t run_train_only_with_live_monitor(
 }
 #endif
 
-#if defined(AUTOEHW_HOST_STUB) || defined(AUTOEHW_BOARD_V9_CONFIRM_MODE)
+#if defined(AUTOEHW_HOST_STUB) || defined(AUTOEHW_BOARD_V9_CONFIRM_MODE) || defined(AUTOEHW_BOARD_STORE_DIGEST_MODE)
 static void publish_v9_confirm_progress(void *ctx, const autoehw_v2_progress_t *progress) {
     uint32_t payloads[9];
     uint64_t raw;
@@ -931,7 +931,7 @@ static uint32_t measure_v2_evals_per_sec(const autoehw_v2_backend_t *backend) {
 }
 #endif
 
-#if defined(AUTOEHW_HOST_STUB) || defined(AUTOEHW_BOARD_V9_CONFIRM_MODE)
+#if defined(AUTOEHW_HOST_STUB) || defined(AUTOEHW_BOARD_V9_CONFIRM_MODE) || defined(AUTOEHW_BOARD_STORE_DIGEST_MODE)
 static int board_eval_frame_graded(
     void *ctx,
     const uart_condition_t *condition,
@@ -1384,8 +1384,8 @@ int autoehw_board_main(void) {
         uint32_t blob_crc = 0;
         uint32_t write_count = 0;
         uint32_t measured_evals_per_sec = measure_v9_graded_evals_per_sec(&graded_backend);
-        uint32_t arm_budget = v9_confirm_arm_budget(measured_evals_per_sec);
-        uint32_t heartbeat_generations = v9_confirm_heartbeat_candidates(measured_evals_per_sec);
+        uint32_t arm_budget = AUTOEHW_V9_CONFIRM_SMOKE_BUDGET;
+        uint32_t heartbeat_generations = 2u;
         champion_store_v2_restore_t restored = {0};
         int restored_valid = load_persisted_champion_v2(&restored);
         autoehw_v2_confirm_result_t result = autoehw_v2_firmware_confirm_island8_graded_v9(
@@ -1396,7 +1396,7 @@ int autoehw_board_main(void) {
             AUTOEHW_V2_LONGRUN_TRAIN_FRAMES,
             AUTOEHW_V2_FINAL_HOLDOUT_FRAMES,
             (int)heartbeat_generations,
-            publish_v9_confirm_progress,
+            0,
             0
         );
         (void)champion_store_write_v2(

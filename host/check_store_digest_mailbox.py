@@ -18,10 +18,44 @@ HEX_RE = re.compile(r"(?:0x)?([0-9a-fA-F]{8})")
 PAGE_ID = 15
 COUNT = 11
 REPLAY_SCHEMA_1_1_0 = 0x010100
+STORE_MAGIC = 0x43484D50
+STORE_V2 = 0x00020000
+RECORD_WORDS = 16
+GENOME_BITS = 39
+FNV_OFFSET = 0x811C9DC5
+FNV_PRIME = 0x01000193
 
 
 def parse_words(text: str) -> list[int]:
-    return [int(match.group(1), 16) for match in HEX_RE.finditer(text)]
+    words: list[int] = []
+    for line in text.splitlines():
+        data = line.split(":", 1)[1] if ":" in line else line
+        words.extend(int(match.group(1), 16) for match in HEX_RE.finditer(data))
+    return words
+
+
+def checksum_words(words: list[int]) -> int:
+    acc = FNV_OFFSET
+    for word in words:
+        for byte in range(4):
+            acc ^= (word >> (byte * 8)) & 0xFF
+            acc = (acc * FNV_PRIME) & 0xFFFFFFFF
+    return acc
+
+
+def expected_raw_from_store(path: Path) -> int:
+    words = parse_words(path.read_text())
+    if len(words) < RECORD_WORDS:
+        raise ValueError(f"need at least {RECORD_WORDS} store words, got {len(words)}")
+    record = words[:RECORD_WORDS]
+    if record[0] != STORE_MAGIC or record[1] != STORE_V2:
+        raise ValueError("store record magic/version mismatch")
+    if record[15] != checksum_words(record[:15]):
+        raise ValueError("store record checksum mismatch")
+    raw = record[6] | (record[7] << 32)
+    if raw >> GENOME_BITS:
+        raise ValueError(f"store record raw genome exceeds {GENOME_BITS} bits")
+    return raw
 
 
 def decode_page(words: list[int]) -> tuple[int, ...] | None:
@@ -53,7 +87,13 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--expect-write-count", type=int, default=1)
     parser.add_argument("--require-restore", action="store_true")
+    parser.add_argument("--expect-raw-from-store", type=Path)
     args = parser.parse_args()
+
+    try:
+        expected_raw = expected_raw_from_store(args.expect_raw_from_store) if args.expect_raw_from_store else None
+    except ValueError as exc:
+        return fail(str(exc))
 
     payloads = decode_page(parse_words(sys.stdin.read()))
     if payloads is None:
@@ -69,11 +109,15 @@ def main() -> int:
     restored = (payloads[8] & 0x000001) != 0
     restored_matches = (payloads[8] & 0x000100) != 0
     restored_raw = payloads[9] | (payloads[10] << 22)
+    if expected_raw is not None and restored and restored_raw != expected_raw:
+        return fail(f"restored raw mismatch: 0x{restored_raw:010x} != 0x{expected_raw:010x}")
     if args.require_restore and not (restored and restored_matches and restored_raw != 0):
         return fail(
             "restore status mismatch: "
             f"status=0x{payloads[8]:06x} raw=0x{restored_raw:010x}"
         )
+    if args.require_restore and expected_raw is not None and restored_raw != expected_raw:
+        return fail(f"restored raw mismatch: 0x{restored_raw:010x} != 0x{expected_raw:010x}")
     print(
         "PASS "
         f"schema=0x{payloads[0]:06x} "
