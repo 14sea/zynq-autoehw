@@ -898,7 +898,7 @@ class UartStreamV2HeadroomTest(unittest.TestCase):
             capture_output=True,
         )
         digest_words = [int(line, 16) for line in digest.stdout.strip().splitlines()]
-        self.assertEqual(digest_words[0], 0xC00F0008)
+        self.assertEqual(digest_words[0], 0xC00F000B)
         digest_check = subprocess.run(
             ["python3", "host/check_store_digest_mailbox.py"],
             cwd=ROOT,
@@ -986,6 +986,30 @@ class UartStreamV2HeadroomTest(unittest.TestCase):
             capture_output=True,
         )
         self.assertEqual(md_restore.stdout, restore.stdout)
+
+        roundtrip = subprocess.run(
+            [str(BOARD), "--restore-v2-roundtrip-smoke"],
+            cwd=ROOT,
+            check=True,
+            text=True,
+            capture_output=True,
+        )
+        roundtrip_words = [int(line, 16) for line in roundtrip.stdout.strip().splitlines()]
+        self.assertEqual(roundtrip_words[0], 0xC00F000B)
+        restore_check = subprocess.run(
+            ["python3", "host/check_store_digest_mailbox.py", "--require-restore"],
+            cwd=ROOT,
+            input=roundtrip.stdout,
+            check=True,
+            text=True,
+            capture_output=True,
+        )
+        self.assertIn("restore=yes", restore_check.stdout)
+        payloads = [word & 0x003FFFFF for word in roundtrip_words[1:12]]
+        restored_raw = payloads[9] | (payloads[10] << 22)
+        store_record = [int(line, 16) for line in store_words.stdout.strip().splitlines()[:16]]
+        stored_raw = store_record[6] | (store_record[7] << 32)
+        self.assertEqual(restored_raw, stored_raw)
 
 
 if __name__ == "__main__":

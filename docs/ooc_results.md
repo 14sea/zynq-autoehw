@@ -416,3 +416,25 @@ formatting is what let this through.
 **Gate decision:** no DFX build yet. The fix changes firmware, firmware is baked
 into the bitstream's BRAM INIT, so a build now would be thrown away. Building
 when the restore reader lands.
+
+### Round-4 follow-up submitted after restore blocker (pending DFX)
+
+The firmware follow-up keeps the converter's v2 byte-copy semantics and fixes
+the actual consumer:
+
+- `load_persisted_champion_v2()` reads low-half words 0..15, validates `CHMP`,
+  schema `0x00020000`, the 16-word record checksum, and the 39-bit raw-genome
+  range, then restores the v2 champion without converting it to the lossy v1
+  `SamplerConfig` ABI.
+- Page 15 keeps its original digest payloads in positions 0..7 and extends the
+  page with restore status plus restored raw-genome chunks. A board observer can
+  now require `restore_valid && restored_raw == stored_raw` after the
+  power-cycle `fatload`.
+- The host gate now drives the restore path: it generates a high-half store
+  record, clears the fake framebuf to model reconfiguration, writes that record
+  into low-half restore words, runs the firmware restore reader, and asserts the
+  recovered v2 raw genome equals the stored one.
+
+This resolves the false-green text-only test gap. RTL OOC remains the already
+measured 222c51b result (72 LUT / 0 LUTRAM / 4 BRAM); the remaining gate is a
+fresh firmware/DFX build and the physical NV round trip on the 4203.

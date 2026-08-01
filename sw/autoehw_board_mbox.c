@@ -145,6 +145,12 @@ size_t autoehw_host_framebuf_word_count(void) {
 uint32_t autoehw_host_framebuf_at(size_t idx) {
     return idx < (sizeof(host_framebuf_words) / sizeof(host_framebuf_words[0])) ? host_framebuf_words[idx] : 0;
 }
+
+static void reset_host_framebuf(void) {
+    for (size_t idx = 0; idx < (sizeof(host_framebuf_words) / sizeof(host_framebuf_words[0])); idx++) {
+        host_framebuf_words[idx] = 0;
+    }
+}
 #else
 #include <neorv32.h>
 #define MBOX (*(volatile uint32_t *)0xF1000000u)
@@ -182,6 +188,22 @@ typedef struct {
     uint32_t write_counter;
     uint32_t write_budget;
 } champion_store_t;
+
+typedef struct {
+    uint32_t magic;
+    uint32_t version;
+    uint32_t seed;
+    uint32_t budget;
+    uart_sampler_genome_v2_t genome;
+    uint64_t raw_genome;
+    uint32_t train_score;
+    uint32_t train_total;
+    uint32_t hard_holdout_packed;
+    uint32_t graded_holdout;
+    uint64_t evals;
+    uint32_t write_count;
+    uint32_t checksum;
+} champion_store_v2_restore_t;
 
 typedef struct {
     int condition_idx;
@@ -763,6 +785,42 @@ static int champion_store_write_v2(
     return 1;
 }
 
+static int load_persisted_champion_v2(champion_store_v2_restore_t *store) {
+    uint32_t record[AUTOEHW_STORE_RECORD_WORDS];
+    uint64_t raw;
+
+    if (store == 0) {
+        return 0;
+    }
+    for (unsigned idx = 0; idx < AUTOEHW_STORE_RECORD_WORDS; idx++) {
+        record[idx] = read_store_word(idx);
+    }
+    if (record[0] != AUTOEHW_CHAMPION_STORE_MAGIC ||
+        record[1] != AUTOEHW_CHAMPION_STORE_V2_VERSION ||
+        record[15] != checksum_words32(record, AUTOEHW_STORE_RECORD_WORDS - 1u)) {
+        return 0;
+    }
+    raw = (uint64_t)record[6] | ((uint64_t)record[7] << 32);
+    if ((raw >> UART_STREAM_V2_GENOME_BITS) != 0u) {
+        return 0;
+    }
+
+    store->magic = record[0];
+    store->version = record[1];
+    store->seed = record[4];
+    store->budget = record[5];
+    store->raw_genome = raw;
+    store->genome = uart_v2_decode_genome(raw);
+    store->train_score = record[8];
+    store->train_total = record[9];
+    store->hard_holdout_packed = record[10];
+    store->graded_holdout = record[11];
+    store->evals = (uint64_t)record[12] | ((uint64_t)record[13] << 32);
+    store->write_count = record[14];
+    store->checksum = record[15];
+    return 1;
+}
+
 static int append_store_digest_page(
     uint32_t *ev,
     int idx,
@@ -770,9 +828,12 @@ static int append_store_digest_page(
     uint32_t record_checksum,
     uint32_t blob_length_words,
     uint32_t blob_crc,
-    uint32_t write_count
+    uint32_t write_count,
+    int restored_valid,
+    int restored_matches_result,
+    uint64_t restored_raw_genome
 ) {
-    uint32_t payloads[8];
+    uint32_t payloads[11];
     uint64_t build_id = ((uint64_t)AUTOEHW_BUILD_ID_HI << 32) | (uint64_t)AUTOEHW_BUILD_ID_LO;
 
     payloads[0] = AUTOEHW_REPLAY_BUNDLE_SCHEMA_VERSION & 0x003FFFFFu;
@@ -783,7 +844,11 @@ static int append_store_digest_page(
     payloads[5] = blob_length_words & 0x003FFFFFu;
     payloads[6] = blob_crc & 0x003FFFFFu;
     payloads[7] = write_count & 0x003FFFFFu;
-    return append_page(ev, idx, max_words, AUTOEHW_PAGE_ID_STORE_DIGEST, payloads, 8);
+    payloads[8] = (restored_valid ? 0x000001u : 0u) |
+                  (restored_matches_result ? 0x000100u : 0u);
+    payloads[9] = (uint32_t)(restored_raw_genome & 0x003FFFFFu);
+    payloads[10] = (uint32_t)((restored_raw_genome >> 22) & 0x003FFFFFu);
+    return append_page(ev, idx, max_words, AUTOEHW_PAGE_ID_STORE_DIGEST, payloads, 11);
 }
 #endif
 
@@ -1210,8 +1275,13 @@ int autoehw_host_run_store_digest_smoke(void) {
     uint32_t arm_budget = AUTOEHW_V9_CONFIRM_SMOKE_BUDGET;
     uint32_t heartbeat_generations = 2u;
     autoehw_v2_confirm_result_t result;
+    champion_store_v2_restore_t restored = {0};
+    int restored_valid;
+    int restored_matches_result;
+    uint64_t result_raw;
 
     reset_host_mailbox();
+    restored_valid = load_persisted_champion_v2(&restored);
     result = autoehw_v2_firmware_confirm_island8_graded_v9(
         &hard_backend,
         &graded_backend,
@@ -1235,6 +1305,8 @@ int autoehw_host_run_store_digest_smoke(void) {
             &write_count)) {
         return 1;
     }
+    result_raw = uart_v2_encode_genome(result.variant.hard.best_genome);
+    restored_matches_result = restored_valid && restored.raw_genome == result_raw;
     ev_count = append_store_digest_page(
         ev,
         ev_count,
@@ -1242,12 +1314,33 @@ int autoehw_host_run_store_digest_smoke(void) {
         record_checksum,
         blob_length_words,
         blob_crc,
-        write_count
+        write_count,
+        restored_valid,
+        restored_matches_result,
+        restored_valid ? restored.raw_genome : 0u
     );
     for (int i = 0; i < ev_count; i++) {
         publish(ev[i]);
     }
     return ev_count == 0 ? 1 : 0;
+}
+
+int autoehw_host_run_restore_v2_roundtrip_smoke(void) {
+    uint32_t saved_record[AUTOEHW_STORE_RECORD_WORDS];
+
+    reset_host_framebuf();
+    if (autoehw_host_run_store_digest_smoke() != 0) {
+        return 1;
+    }
+    for (unsigned idx = 0; idx < AUTOEHW_STORE_RECORD_WORDS; idx++) {
+        saved_record[idx] = read_store_word(AUTOEHW_FRAMEBUF_BOARD_STORE_WORD + idx);
+    }
+
+    reset_host_framebuf();
+    for (unsigned idx = 0; idx < AUTOEHW_STORE_RECORD_WORDS; idx++) {
+        write_store_word(idx, saved_record[idx]);
+    }
+    return autoehw_host_run_store_digest_smoke();
 }
 #endif
 
@@ -1293,6 +1386,8 @@ int autoehw_board_main(void) {
         uint32_t measured_evals_per_sec = measure_v9_graded_evals_per_sec(&graded_backend);
         uint32_t arm_budget = v9_confirm_arm_budget(measured_evals_per_sec);
         uint32_t heartbeat_generations = v9_confirm_heartbeat_candidates(measured_evals_per_sec);
+        champion_store_v2_restore_t restored = {0};
+        int restored_valid = load_persisted_champion_v2(&restored);
         autoehw_v2_confirm_result_t result = autoehw_v2_firmware_confirm_island8_graded_v9(
             &hard_backend,
             &graded_backend,
@@ -1322,7 +1417,10 @@ int autoehw_board_main(void) {
             record_checksum,
             blob_length_words,
             blob_crc,
-            write_count
+            write_count,
+            restored_valid,
+            restored_valid && restored.raw_genome == uart_v2_encode_genome(result.variant.hard.best_genome),
+            restored_valid ? restored.raw_genome : 0u
         );
         for (int i = 0; i < ev_count; i++) {
             publish(ev[i]);

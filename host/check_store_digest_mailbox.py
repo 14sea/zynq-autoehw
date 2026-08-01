@@ -16,7 +16,7 @@ from sim.uart_stream_v1 import mailbox_page_checksum  # noqa: E402
 
 HEX_RE = re.compile(r"(?:0x)?([0-9a-fA-F]{8})")
 PAGE_ID = 15
-COUNT = 8
+COUNT = 11
 REPLAY_SCHEMA_1_1_0 = 0x010100
 
 
@@ -52,6 +52,7 @@ def fail(message: str) -> int:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--expect-write-count", type=int, default=1)
+    parser.add_argument("--require-restore", action="store_true")
     args = parser.parse_args()
 
     payloads = decode_page(parse_words(sys.stdin.read()))
@@ -65,11 +66,20 @@ def main() -> int:
         return fail("blob crc is zero")
     if payloads[7] != args.expect_write_count:
         return fail(f"write_count mismatch: {payloads[7]} != {args.expect_write_count}")
+    restored = (payloads[8] & 0x000001) != 0
+    restored_matches = (payloads[8] & 0x000100) != 0
+    restored_raw = payloads[9] | (payloads[10] << 22)
+    if args.require_restore and not (restored and restored_matches and restored_raw != 0):
+        return fail(
+            "restore status mismatch: "
+            f"status=0x{payloads[8]:06x} raw=0x{restored_raw:010x}"
+        )
     print(
         "PASS "
         f"schema=0x{payloads[0]:06x} "
         f"blob_words={payloads[5]} "
-        f"write_count={payloads[7]}"
+        f"write_count={payloads[7]} "
+        f"restore={'yes' if restored else 'no'}"
     )
     return 0
 
