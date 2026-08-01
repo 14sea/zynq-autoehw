@@ -526,3 +526,50 @@ Local follow-up gates:
 - A full `riscv64-unknown-elf-gcc` compile was attempted but the installed
   toolchain is missing standard newlib headers (`inttypes.h`), so that exact
   cross-compile remains for Claude's board toolchain.
+
+### Round 5 (commit 966643c) — guards fixed, **firmware now overflows IMEM**
+
+The three round-4 items are addressed: the mode guards compile, the board mode
+uses the smoke budget, and `--expect-raw-from-store` makes the checker recompute
+instead of trusting the board's match bit. Compilation gets past the guards.
+
+**New blocker — link fails:**
+
+```
+ld: main.elf section `.text' will not fit in region `rom'
+ld: region `rom' overflowed by 1884 bytes
+```
+
+`neorv32_soc_dfx.vhd` sets `IMEM_SIZE => 32*1024` and the fw Makefile pins
+`__neorv32_rom_size=32k`, so the image must fit 32 768 B. The store-digest image
+needs **34 652 B — 5.4 % over**, not a magnitude, but the linker is exact.
+
+`--gc-sections` and `-ffunction-sections/-fdata-sections` are already on
+(`common.mk:147-148`), so this is post-collection: the code is genuinely linked.
+Per-object `.text*` totals (sum every `.text*` section — plain `size -A` hides
+them under function sections):
+
+| object | text | rodata |
+|---|---|---|
+| `uart_stream_v2.c.o` | 9 742 | 987 |
+| `neorv32_aux.c.o` | 4 432 | 3 350 |
+| `autoehw_firmware_v2.c.o` | 3 962 | 52 |
+| `autoehw_board_mbox.c.o` | 2 670 | 8 |
+| `uart_stream_v1.c.o` | 1 668 | 475 |
+
+**Recommended fix — drop the search from this mode entirely.** The store-digest
+mode still links the full graded v9 confirm search
+(`autoehw_v2_firmware_confirm_island8_graded_v9`, ~4 KB, plus the graded
+evaluation paths it keeps alive in `uart_stream_v2.c`), only with a smaller
+budget. But the addendum claims persistence, not search: it needs *a* champion,
+not an *earned* one. Seeding the frozen v9 champion as a constant and going
+straight to store → digest → restore removes far more than 1 884 B, makes the
+expected values fixed and host-checkable, and removes the last reason for this
+mode to be slow. A separate minimal `main()` for the store test would have the
+same effect.
+
+Enlarging `IMEM_SIZE` to 64 KB is the alternative, but it perturbs a static
+shell that just passed OOC and spends ~8 more BRAM tiles for a testability
+problem. Not recommended while a trim is available.
+
+**Gate decision:** still no DFX build — there is no linkable board image.
