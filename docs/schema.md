@@ -307,6 +307,31 @@ policy:
   hot_loop_writes_nv: false          # per-gen telemetry stays in RAM
 ```
 
+### `write_budget` — schema_version 1.1.0 addendum fields
+
+M1 engineering addendum records the board-side counter in the champion record
+itself. This is a MINOR bump: old `1.0.0` fixtures remain valid, while consumers
+that understand `1.1.0` can verify the physical store flush did not exceed the
+run ceiling.
+
+```yaml
+schema: write_budget
+schema_version: "1.1.0"
+budget_id: write_budget_uart_sampler_v2_sd
+store: {type: fat_file, ref: mmc0:1/champ.bin}
+per_run_budget: 1000
+counters:
+  write_count: 1                     # board-origin champion record v2 field
+  champion_writes: 1                 # compatibility alias for 1.0.0 consumers
+policy:
+  enforced_by: firmware_and_flush_script
+  hardware_enforced: false
+  hot_loop_writes_nv: false
+```
+
+The write ceiling is enforced by firmware and the one-shot U-Boot/host flush
+script, not by the framebuf RAM hardware.
+
 ---
 
 ## 8. `replay_bundle` — schema_version 1.0.0
@@ -361,6 +386,56 @@ reproduces it from artifacts alone. All contract, benchmark, whitelist, optional
 map, run-log, bitstream, frame-diff, and script inputs are pinned by version and
 hash. If reproduction needs uncommitted local state, the champion does not count.
 
+### `replay_bundle` — schema_version 1.1.0 board-origin addendum
+
+M1 engineering addendum adds a board-origin binary replay blob. This is a MINOR
+bump: no `1.0.0` field is removed or reinterpreted. The host converts the blob to
+JSON with `host/assemble_replay_bundle.py`, then verifies it with
+`host/verify_replay_bundle.py`.
+
+```yaml
+schema: replay_bundle
+schema_version: "1.1.0"
+source: board_framebuf_blob
+build_id: 0x0ff541722c493646
+build_id_semantics: semantic_replay_inputs_not_firmware_image_hash
+benchmark_id: uart_stream_v2_headroom
+genome_contract: {genome_id: uart_sampler_v2_headroom, schema_version: "2.0.0"}
+search:
+  variant: pbil_island8_graded_v9
+  random_baseline: random
+  search_seed: 0xB17D
+  arm_budget: <board-derived>
+  measured_evals_per_sec: <board-measured>
+  train_frames_per_condition: 64
+  holdout_frames_per_condition: 256
+champion:
+  raw_genome: <39-bit hex>
+  train_score: <graded train score>
+  train_total: <graded train total>
+  hard_holdout: {passed: <n>, total: 1024}
+  graded_holdout: <bit-match score>
+  graded_holdout_total: <bit-match total>
+  evals: <frame evals>
+random_equal_budget:
+  raw_genome: <39-bit hex>
+  hard_holdout: {passed: <n>, total: 1024}
+  graded_holdout: <bit-match score>
+write_budget:
+  schema_version: "1.1.0"
+  write_count: <record counter>
+integrity:
+  record_checksum: <u32>
+  blob_crc: <u32>
+  blob_words: <n>
+```
+
+**Build-id rule:** `build_id` is generated on the host from semantic replay
+inputs: genome contract version, variant name, benchmark id and numeric band,
+train/holdout frame counts, conditions, and seed policy. It is not, and cannot
+be, a hash of the firmware image that contains it. Host-side bundle metadata may
+separately record artifact hashes such as bitstream md5 or IMEM md5.
+
 ---
 
 ## Schema registry (versions at a glance)
@@ -373,8 +448,8 @@ hash. If reproduction needs uncommitted local state, the champion does not count
 | `run_log` | 1.0.0 | required run-evidence fields change |
 | `safety_whitelist` | 1.0.0 | allowed-bit / composition-rule semantics change |
 | `blacklist` | 1.0.0 | fingerprint or reason taxonomy changes |
-| `write_budget` | 1.0.0 | store accounting / policy changes |
-| `replay_bundle` | 1.0.0 | replay contents / verification changes |
+| `write_budget` | 1.0.0, 1.1.0 | store accounting / policy changes |
+| `replay_bundle` | 1.0.0, 1.1.0 | replay contents / verification changes |
 
 Each gets a standalone validator + a conformance-test fixture in M1, shared by any
 repo that consumes the schema (`cyclone-fabric-cartographer`, K7 line).

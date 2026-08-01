@@ -44,8 +44,26 @@ int main(int argc, char **argv) {
             printf("%08x\n", autoehw_host_mailbox_at(idx));
         }
         return 0;
+    } else if (argc == 2 && strcmp(argv[1], "--store-digest-smoke") == 0) {
+        if (autoehw_host_run_store_digest_smoke() != 0) {
+            fprintf(stderr, "store digest smoke failed\n");
+            return 1;
+        }
+        for (size_t idx = 0; idx < autoehw_host_mailbox_count(); idx++) {
+            printf("%08x\n", autoehw_host_mailbox_at(idx));
+        }
+        return 0;
+    } else if (argc == 2 && strcmp(argv[1], "--dump-store-window") == 0) {
+        if (autoehw_host_run_store_digest_smoke() != 0) {
+            fprintf(stderr, "store digest smoke failed\n");
+            return 1;
+        }
+        for (size_t idx = 1024; idx < 1064 && idx < autoehw_host_framebuf_word_count(); idx++) {
+            printf("%08x\n", autoehw_host_framebuf_at(idx));
+        }
+        return 0;
     } else if (argc != 1) {
-        fprintf(stderr, "usage: %s [--seed-persisted|--longrun-monitor-smoke|--v2-ab-mailbox-smoke|--v2-ab-longrun-smoke|--graded-smoke|--v9-confirm-smoke]\n", argv[0]);
+        fprintf(stderr, "usage: %s [--seed-persisted|--longrun-monitor-smoke|--v2-ab-mailbox-smoke|--v2-ab-longrun-smoke|--graded-smoke|--v9-confirm-smoke|--store-digest-smoke|--dump-store-window]\n", argv[0]);
         return 2;
     }
 

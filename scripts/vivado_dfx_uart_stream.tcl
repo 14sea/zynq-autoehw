@@ -15,6 +15,7 @@ set origin [file normalize [file dirname [info script]]]
 set root   [file normalize [file join $origin ..]]
 set zynq_ehw_root [file normalize [file join $root .. zynq_ehw]]
 set nhome  [file normalize [file join $zynq_ehw_root rtl_src neorv32_tpu neorv32]]
+set shell  [file normalize [file join $root external shell]]
 set bdir   [file join $root build dfx]
 
 if {![file exists $nhome]} {
@@ -29,12 +30,13 @@ set fl [string map [list NEORV32_RTL_PATH_PLACEHOLDER [file join $nhome rtl]] $f
 add_files $fl
 set_property library neorv32 [get_files $fl]
 
-# Reuse the zynq-ehw static DFX shell and PS mailbox convention. This repo owns
-# only the uart_stream RM sources below.
+# Reuse the copied static DFX shell and PS mailbox convention. This repo owns the
+# M1-addendum framebuf write-port copy in external/shell; sibling repos remain
+# read-only.
 add_files [list \
-  [file join $zynq_ehw_root rtl neorv32_soc_dfx.vhd] \
-  [file join $zynq_ehw_root rtl axil_framebuf.vhd] \
-  [file join $zynq_ehw_root rtl dfx_top.v] \
+  [file join $shell neorv32_soc_dfx.vhd] \
+  [file join $shell axil_framebuf.vhd] \
+  [file join $shell dfx_top.v] \
   [file join $root rtl uart_stream_eval_core.v] \
   [file join $root rtl uart_stream_island_regs.v] \
   [file join $root rtl dfx tpu_rp_rm_uart_stream.v] \
@@ -43,4 +45,3 @@ add_files [list \
 puts "DFX scaffold sources loaded. Complete BD/static setup follows zynq_ehw/vivado/dfx/build_dfx.tcl."
 puts "Claude gate: either splice tpu_rp_rm_uart_stream.v into the proven zynq-ehw build_dfx.tcl"
 puts "or extend this scaffold with the PS7 + AXI-GPIO BD before generating bitstreams."
-

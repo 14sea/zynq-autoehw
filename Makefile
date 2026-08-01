@@ -2,6 +2,7 @@ PYTHON ?= python3
 CC ?= gcc
 IVERILOG ?= iverilog
 VVP ?= vvp
+GHDL ?= ghdl
 
 CFLAGS ?= -std=c11 -Wall -Wextra -Werror -O2
 BUILD_DIR := build
@@ -14,13 +15,14 @@ FIRMWARE_CLI := $(HOST_BUILD)/autoehw_firmware_cli
 V2_FIRMWARE_CLI := $(HOST_BUILD)/autoehw_firmware_v2_cli
 BOARD_HOST_CLI := $(HOST_BUILD)/autoehw_board_host_cli
 MMIO_OBJ := $(HOST_BUILD)/autoehw_mmio_backend.o
+BUILD_ID_HDR := sw/autoehw_build_id.h
 RTL_LFSR_SMOKE := $(RTL_BUILD)/tb_uart_stream_lfsr.vvp
 RTL_EVAL_SMOKE := $(RTL_BUILD)/tb_uart_stream_eval_core.vvp
 RTL_ISLAND_SMOKE := $(RTL_BUILD)/tb_uart_stream_island_regs.vvp
 RTL_XBUS_SMOKE := $(RTL_BUILD)/tb_tpu_rp_uart_stream.vvp
 RTL_EVAL_VECTORS := $(RTL_BUILD)/eval_vectors.txt
 
-.PHONY: all test host-gate c-twin rtl-smoke vivado-ooc clean
+.PHONY: all test host-gate c-twin rtl-smoke framebuf-vhdl-smoke vivado-ooc clean
 
 all: host-gate rtl-smoke
 
@@ -63,7 +65,10 @@ $(V2_FIRMWARE_CLI): sw/uart_stream_v1.c sw/uart_stream_v1.h sw/uart_stream_v2.c 
 	mkdir -p $(HOST_BUILD)
 	$(CC) $(CFLAGS) -I sw sw/uart_stream_v1.c sw/uart_stream_v2.c sw/autoehw_firmware_v2.c sw/autoehw_firmware_v2_cli.c -o $@
 
-$(BOARD_HOST_CLI): sw/uart_stream_v1.c sw/uart_stream_v1.h sw/uart_stream_v2.c sw/uart_stream_v2.h sw/autoehw_runtime.c sw/autoehw_runtime.h sw/autoehw_firmware.c sw/autoehw_firmware.h sw/autoehw_firmware_v2.c sw/autoehw_firmware_v2.h sw/autoehw_mmio_backend.h sw/autoehw_board_mbox.c sw/autoehw_board_host_cli.c
+$(BUILD_ID_HDR): scripts/gen_autoehw_build_id.py
+	$(PYTHON) scripts/gen_autoehw_build_id.py --out $@
+
+$(BOARD_HOST_CLI): sw/uart_stream_v1.c sw/uart_stream_v1.h sw/uart_stream_v2.c sw/uart_stream_v2.h sw/autoehw_runtime.c sw/autoehw_runtime.h sw/autoehw_firmware.c sw/autoehw_firmware.h sw/autoehw_firmware_v2.c sw/autoehw_firmware_v2.h sw/autoehw_mmio_backend.h sw/autoehw_board_mbox.c sw/autoehw_board_host_cli.c $(BUILD_ID_HDR)
 	mkdir -p $(HOST_BUILD)
 	$(CC) $(CFLAGS) -I sw sw/uart_stream_v1.c sw/uart_stream_v2.c sw/autoehw_runtime.c sw/autoehw_firmware.c sw/autoehw_firmware_v2.c sw/autoehw_board_host_cli.c -o $@
 
@@ -76,6 +81,13 @@ rtl-smoke: $(RTL_LFSR_SMOKE) $(RTL_EVAL_SMOKE) $(RTL_ISLAND_SMOKE) $(RTL_XBUS_SM
 	$(VVP) $(RTL_EVAL_SMOKE) +VECTORS=$(RTL_EVAL_VECTORS)
 	$(VVP) $(RTL_ISLAND_SMOKE)
 	$(VVP) $(RTL_XBUS_SMOKE)
+
+framebuf-vhdl-smoke:
+	mkdir -p $(RTL_BUILD)/ghdl
+	$(GHDL) -a --std=08 --workdir=$(RTL_BUILD)/ghdl external/shell/axil_framebuf.vhd
+	$(GHDL) -a --std=08 --workdir=$(RTL_BUILD)/ghdl rtl/tb_axil_framebuf_write.vhd
+	$(GHDL) -e --std=08 --workdir=$(RTL_BUILD)/ghdl tb_axil_framebuf_write
+	$(GHDL) -r --std=08 --workdir=$(RTL_BUILD)/ghdl tb_axil_framebuf_write --stop-time=300ns
 
 $(RTL_LFSR_SMOKE): rtl/uart_stream_lfsr.v rtl/tb_uart_stream_lfsr.v
 	mkdir -p $(RTL_BUILD)

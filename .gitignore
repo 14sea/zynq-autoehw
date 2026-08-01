@@ -1,5 +1,13 @@
-# read-only copies of sibling projects, mined for reference only — never committed
-external/
+# read-only copies of sibling projects, mined for reference only.
+# The M1 engineering addendum owns exactly these copied static-shell files so the
+# framebuf write-port evidence is reproducible from this repo; all other
+# external/ content stays untracked.
+external/*
+!external/shell/
+external/shell/*
+!external/shell/axil_framebuf.vhd
+!external/shell/neorv32_soc_dfx.vhd
+!external/shell/dfx_top.v
 # copyrighted reference PDFs
 ref/
 # hot-loop CSV / telemetry logs

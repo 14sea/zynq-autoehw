@@ -8,6 +8,7 @@
 
 #include "autoehw_firmware.h"
 #include "autoehw_firmware_v2.h"
+#include "autoehw_build_id.h"
 #include "autoehw_mmio_backend.h"
 
 #include <stdint.h>
@@ -48,6 +49,7 @@
 #define AUTOEHW_PAGE_ID_V9_CONFIRM_RANDOM 12u
 #define AUTOEHW_PAGE_ID_V9_CONFIRM_VARIANT_PROGRESS 13u
 #define AUTOEHW_PAGE_ID_V9_CONFIRM_RANDOM_PROGRESS 14u
+#define AUTOEHW_PAGE_ID_STORE_DIGEST 15u
 #define AUTOEHW_LEGACY_WORD_COUNT 15u
 #define AUTOEHW_V2_AB_BUDGET 16
 #define AUTOEHW_V2_AB_FRAMES 4
@@ -70,8 +72,17 @@
 #define AUTOEHW_WRITE_BUDGET 1000u
 #define AUTOEHW_CHAMPION_STORE_MAGIC 0x43484D50u
 #define AUTOEHW_CHAMPION_STORE_VERSION 0x00010000u
+#define AUTOEHW_CHAMPION_STORE_V2_VERSION 0x00020000u
 #define AUTOEHW_CHAMPION_STORE_SALT 0x9E3779B9u
 #define AUTOEHW_FRAMEBUF_STORE_BASE 0xF5000000u
+#define AUTOEHW_FRAMEBUF_WORDS 2048u
+#define AUTOEHW_FRAMEBUF_BOARD_STORE_WORD 1024u
+#define AUTOEHW_STORE_RECORD_WORDS 16u
+#define AUTOEHW_REPLAY_BLOB_WORDS 24u
+#define AUTOEHW_REPLAY_BLOB_MAGIC 0x52504C59u
+#define AUTOEHW_REPLAY_BUNDLE_SCHEMA_VERSION 0x00010100u
+#define AUTOEHW_GENOME_CONTRACT_V2_VERSION 0x00020000u
+#define AUTOEHW_BENCHMARK_ID_U32 0x55533256u
 #define AUTOEHW_GRADED_SMOKE_VECTOR_COUNT 8u
 #define AUTOEHW_GRADED_SMOKE_PAYLOAD_COUNT 10u
 #define AUTOEHW_SETB_CONFIRM_SEED 0xB17Du
@@ -81,8 +92,8 @@
 
 #ifdef AUTOEHW_HOST_STUB
 #include <stddef.h>
-static uint32_t mailbox_words[160];
-static uint32_t host_framebuf_words[8];
+static uint32_t mailbox_words[192];
+static uint32_t host_framebuf_words[AUTOEHW_FRAMEBUF_WORDS];
 static size_t mailbox_count;
 static uint32_t mailbox_last;
 
@@ -95,6 +106,12 @@ static uint64_t read_cycle64(void) {
 
 static uint32_t read_store_word(unsigned idx) {
     return idx < (sizeof(host_framebuf_words) / sizeof(host_framebuf_words[0])) ? host_framebuf_words[idx] : 0;
+}
+
+static void write_store_word(unsigned idx, uint32_t value) {
+    if (idx < (sizeof(host_framebuf_words) / sizeof(host_framebuf_words[0]))) {
+        host_framebuf_words[idx] = value;
+    }
 }
 
 static void publish(uint32_t word) {
@@ -120,6 +137,14 @@ uint32_t autoehw_host_mailbox_at(size_t idx) {
 uint32_t autoehw_host_mailbox_last(void) {
     return mailbox_last;
 }
+
+size_t autoehw_host_framebuf_word_count(void) {
+    return sizeof(host_framebuf_words) / sizeof(host_framebuf_words[0]);
+}
+
+uint32_t autoehw_host_framebuf_at(size_t idx) {
+    return idx < (sizeof(host_framebuf_words) / sizeof(host_framebuf_words[0])) ? host_framebuf_words[idx] : 0;
+}
 #else
 #include <neorv32.h>
 #define MBOX (*(volatile uint32_t *)0xF1000000u)
@@ -139,6 +164,10 @@ static uint64_t read_cycle64(void) {
 
 static uint32_t read_store_word(unsigned idx) {
     return STORE_WORDS[idx];
+}
+
+static void write_store_word(unsigned idx, uint32_t value) {
+    STORE_WORDS[idx] = value;
 }
 
 static void publish(uint32_t word) {
@@ -599,6 +628,165 @@ static uint32_t champion_store_checksum(uint32_t magic, uint32_t meta, uint32_t 
     return magic ^ meta ^ config ^ budget ^ AUTOEHW_CHAMPION_STORE_SALT;
 }
 
+static uint32_t checksum_words32(const uint32_t *words, unsigned count) {
+    uint32_t acc = 0x811C9DC5u;
+    for (unsigned idx = 0; idx < count; idx++) {
+        uint32_t word = words[idx];
+        for (unsigned byte = 0; byte < 4; byte++) {
+            acc ^= (word >> (byte * 8u)) & 0xFFu;
+            acc *= 0x01000193u;
+        }
+    }
+    return acc;
+}
+
+static uint32_t pack_hard_holdout_u32(int passed, int total) {
+    return (((uint32_t)passed & 0x0FFFu) << 12) | ((uint32_t)total & 0x0FFFu);
+}
+
+#if defined(AUTOEHW_HOST_STUB) || defined(AUTOEHW_BOARD_STORE_DIGEST_MODE)
+static unsigned champion_store_v2_current_write_count(void) {
+    uint32_t base = AUTOEHW_FRAMEBUF_BOARD_STORE_WORD;
+    uint32_t magic = read_store_word(base);
+    uint32_t version = read_store_word(base + 1u);
+    uint32_t checksum = read_store_word(base + 15u);
+    uint32_t words[AUTOEHW_STORE_RECORD_WORDS - 1u];
+
+    if (magic != AUTOEHW_CHAMPION_STORE_MAGIC || version != AUTOEHW_CHAMPION_STORE_V2_VERSION) {
+        return 0;
+    }
+    for (unsigned idx = 0; idx < AUTOEHW_STORE_RECORD_WORDS - 1u; idx++) {
+        words[idx] = read_store_word(base + idx);
+    }
+    if (checksum != checksum_words32(words, AUTOEHW_STORE_RECORD_WORDS - 1u)) {
+        return 0;
+    }
+    return read_store_word(base + 14u);
+}
+
+static int champion_store_write_v2(
+    autoehw_v2_confirm_result_t result,
+    uint32_t measured_evals_per_sec,
+    uint32_t arm_budget,
+    uint32_t seed,
+    uint32_t write_budget,
+    uint32_t *record_checksum,
+    uint32_t *blob_length_words,
+    uint32_t *blob_crc,
+    uint32_t *write_count
+) {
+    uint32_t base = AUTOEHW_FRAMEBUF_BOARD_STORE_WORD;
+    uint32_t record[AUTOEHW_STORE_RECORD_WORDS];
+    uint32_t blob[AUTOEHW_REPLAY_BLOB_WORDS];
+    uint32_t current_writes = champion_store_v2_current_write_count();
+    uint64_t raw = uart_v2_encode_genome(result.variant.hard.best_genome);
+    uint64_t random_raw = uart_v2_encode_genome(result.random.hard.best_genome);
+    uint64_t evals = (uint64_t)(uint32_t)result.variant.hard.evals;
+
+    if (write_budget == 0u || current_writes >= write_budget) {
+        if (record_checksum != 0) {
+            *record_checksum = 0;
+        }
+        if (blob_length_words != 0) {
+            *blob_length_words = 0;
+        }
+        if (blob_crc != 0) {
+            *blob_crc = 0;
+        }
+        if (write_count != 0) {
+            *write_count = current_writes;
+        }
+        return 0;
+    }
+
+    record[0] = AUTOEHW_CHAMPION_STORE_MAGIC;
+    record[1] = AUTOEHW_CHAMPION_STORE_V2_VERSION;
+    record[2] = AUTOEHW_BUILD_ID_LO;
+    record[3] = AUTOEHW_BUILD_ID_HI;
+    record[4] = seed;
+    record[5] = arm_budget;
+    record[6] = (uint32_t)(raw & 0xFFFFFFFFu);
+    record[7] = (uint32_t)(raw >> 32);
+    record[8] = (uint32_t)result.variant.hard.best_train_passed;
+    record[9] = (uint32_t)result.variant.hard.train_total;
+    record[10] = pack_hard_holdout_u32(result.variant.hard.holdout_passed, result.variant.hard.holdout_total);
+    record[11] = (uint32_t)result.variant.graded_holdout;
+    record[12] = (uint32_t)(evals & 0xFFFFFFFFu);
+    record[13] = (uint32_t)(evals >> 32);
+    record[14] = current_writes + 1u;
+    record[15] = checksum_words32(record, AUTOEHW_STORE_RECORD_WORDS - 1u);
+
+    blob[0] = AUTOEHW_REPLAY_BLOB_MAGIC;
+    blob[1] = AUTOEHW_REPLAY_BUNDLE_SCHEMA_VERSION;
+    blob[2] = AUTOEHW_BUILD_ID_LO;
+    blob[3] = AUTOEHW_BUILD_ID_HI;
+    blob[4] = AUTOEHW_BENCHMARK_ID_U32;
+    blob[5] = AUTOEHW_GENOME_CONTRACT_V2_VERSION;
+    blob[6] = seed;
+    blob[7] = arm_budget;
+    blob[8] = measured_evals_per_sec;
+    blob[9] = AUTOEHW_V2_LONGRUN_TRAIN_FRAMES;
+    blob[10] = AUTOEHW_V2_FINAL_HOLDOUT_FRAMES;
+    blob[11] = (uint32_t)(raw & 0xFFFFFFFFu);
+    blob[12] = (uint32_t)(raw >> 32);
+    blob[13] = (uint32_t)result.variant.hard.best_train_passed;
+    blob[14] = (uint32_t)result.variant.hard.train_total;
+    blob[15] = pack_hard_holdout_u32(result.variant.hard.holdout_passed, result.variant.hard.holdout_total);
+    blob[16] = (uint32_t)result.variant.graded_holdout;
+    blob[17] = (uint32_t)result.variant.graded_holdout_total;
+    blob[18] = (uint32_t)(evals & 0xFFFFFFFFu);
+    blob[19] = (uint32_t)(evals >> 32);
+    blob[20] = (uint32_t)(random_raw & 0xFFFFFFFFu);
+    blob[21] = (uint32_t)(random_raw >> 32);
+    blob[22] = pack_hard_holdout_u32(result.random.hard.holdout_passed, result.random.hard.holdout_total);
+    blob[23] = (uint32_t)result.random.graded_holdout;
+
+    for (unsigned idx = 0; idx < AUTOEHW_STORE_RECORD_WORDS; idx++) {
+        write_store_word(base + idx, record[idx]);
+    }
+    for (unsigned idx = 0; idx < AUTOEHW_REPLAY_BLOB_WORDS; idx++) {
+        write_store_word(base + AUTOEHW_STORE_RECORD_WORDS + idx, blob[idx]);
+    }
+
+    if (record_checksum != 0) {
+        *record_checksum = record[15];
+    }
+    if (blob_length_words != 0) {
+        *blob_length_words = AUTOEHW_REPLAY_BLOB_WORDS;
+    }
+    if (blob_crc != 0) {
+        *blob_crc = checksum_words32(blob, AUTOEHW_REPLAY_BLOB_WORDS);
+    }
+    if (write_count != 0) {
+        *write_count = record[14];
+    }
+    return 1;
+}
+
+static int append_store_digest_page(
+    uint32_t *ev,
+    int idx,
+    int max_words,
+    uint32_t record_checksum,
+    uint32_t blob_length_words,
+    uint32_t blob_crc,
+    uint32_t write_count
+) {
+    uint32_t payloads[8];
+    uint64_t build_id = ((uint64_t)AUTOEHW_BUILD_ID_HI << 32) | (uint64_t)AUTOEHW_BUILD_ID_LO;
+
+    payloads[0] = AUTOEHW_REPLAY_BUNDLE_SCHEMA_VERSION & 0x003FFFFFu;
+    payloads[1] = (uint32_t)(build_id & 0x003FFFFFu);
+    payloads[2] = (uint32_t)((build_id >> 22) & 0x003FFFFFu);
+    payloads[3] = (uint32_t)((build_id >> 44) & 0x003FFFFFu);
+    payloads[4] = record_checksum & 0x003FFFFFu;
+    payloads[5] = blob_length_words & 0x003FFFFFu;
+    payloads[6] = blob_crc & 0x003FFFFFu;
+    payloads[7] = write_count & 0x003FFFFFu;
+    return append_page(ev, idx, max_words, AUTOEHW_PAGE_ID_STORE_DIGEST, payloads, 8);
+}
+#endif
+
 static int config_is_valid(uart_sampler_config_t config) {
     return config.sample_phase >= 0 &&
            config.sample_phase <= 31 &&
@@ -700,7 +888,7 @@ static int board_eval_frame_graded(
 #endif
 }
 
-#if defined(AUTOEHW_BOARD_V9_CONFIRM_MODE) && !defined(AUTOEHW_HOST_STUB)
+#if (defined(AUTOEHW_BOARD_V9_CONFIRM_MODE) || defined(AUTOEHW_BOARD_STORE_DIGEST_MODE)) && !defined(AUTOEHW_HOST_STUB)
 static uint32_t v9_confirm_arm_budget(uint32_t evals_per_sec) {
     uint64_t candidate_budget = longrun_target_evals(evals_per_sec) /
                                 (uint64_t)(2u * AUTOEHW_V2_LONGRUN_TRAIN_EVALS_PER_CANDIDATE);
@@ -1008,6 +1196,59 @@ int autoehw_host_run_v9_confirm_smoke(void) {
     }
     return ev_count == 0 ? 1 : 0;
 }
+
+int autoehw_host_run_store_digest_smoke(void) {
+    autoehw_v2_backend_t hard_backend = {0, autoehw_v2_fake_eval_frame};
+    autoehw_v2_graded_backend_t graded_backend = {0, board_eval_frame_graded};
+    uint32_t ev[16];
+    int ev_count = 0;
+    uint32_t record_checksum = 0;
+    uint32_t blob_length_words = 0;
+    uint32_t blob_crc = 0;
+    uint32_t write_count = 0;
+    uint32_t measured_evals_per_sec = 1592u;
+    uint32_t arm_budget = AUTOEHW_V9_CONFIRM_SMOKE_BUDGET;
+    uint32_t heartbeat_generations = 2u;
+    autoehw_v2_confirm_result_t result;
+
+    reset_host_mailbox();
+    result = autoehw_v2_firmware_confirm_island8_graded_v9(
+        &hard_backend,
+        &graded_backend,
+        (int)arm_budget,
+        AUTOEHW_SETB_CONFIRM_SEED,
+        AUTOEHW_V2_LONGRUN_TRAIN_FRAMES,
+        AUTOEHW_V2_FINAL_HOLDOUT_FRAMES,
+        (int)heartbeat_generations,
+        0,
+        0
+    );
+    if (!champion_store_write_v2(
+            result,
+            measured_evals_per_sec,
+            arm_budget,
+            AUTOEHW_SETB_CONFIRM_SEED,
+            AUTOEHW_WRITE_BUDGET,
+            &record_checksum,
+            &blob_length_words,
+            &blob_crc,
+            &write_count)) {
+        return 1;
+    }
+    ev_count = append_store_digest_page(
+        ev,
+        ev_count,
+        (int)(sizeof(ev) / sizeof(ev[0])),
+        record_checksum,
+        blob_length_words,
+        blob_crc,
+        write_count
+    );
+    for (int i = 0; i < ev_count; i++) {
+        publish(ev[i]);
+    }
+    return ev_count == 0 ? 1 : 0;
+}
 #endif
 
 int autoehw_board_main(void) {
@@ -1035,6 +1276,56 @@ int autoehw_board_main(void) {
                 MBOX = ev[i];
                 for (volatile uint32_t d = 0; d < 8000000u; d++) { }
             }
+        }
+    }
+#endif
+
+#if defined(AUTOEHW_BOARD_STORE_DIGEST_MODE) && !defined(AUTOEHW_HOST_STUB)
+    {
+        autoehw_v2_backend_t hard_backend = {&mmio, autoehw_v2_mmio_eval_frame};
+        autoehw_v2_graded_backend_t graded_backend = {&mmio, board_eval_frame_graded};
+        uint32_t ev[16];
+        int ev_count = 0;
+        uint32_t record_checksum = 0;
+        uint32_t blob_length_words = 0;
+        uint32_t blob_crc = 0;
+        uint32_t write_count = 0;
+        uint32_t measured_evals_per_sec = measure_v9_graded_evals_per_sec(&graded_backend);
+        uint32_t arm_budget = v9_confirm_arm_budget(measured_evals_per_sec);
+        uint32_t heartbeat_generations = v9_confirm_heartbeat_candidates(measured_evals_per_sec);
+        autoehw_v2_confirm_result_t result = autoehw_v2_firmware_confirm_island8_graded_v9(
+            &hard_backend,
+            &graded_backend,
+            (int)arm_budget,
+            AUTOEHW_SETB_CONFIRM_SEED,
+            AUTOEHW_V2_LONGRUN_TRAIN_FRAMES,
+            AUTOEHW_V2_FINAL_HOLDOUT_FRAMES,
+            (int)heartbeat_generations,
+            publish_v9_confirm_progress,
+            0
+        );
+        (void)champion_store_write_v2(
+            result,
+            measured_evals_per_sec,
+            arm_budget,
+            AUTOEHW_SETB_CONFIRM_SEED,
+            AUTOEHW_WRITE_BUDGET,
+            &record_checksum,
+            &blob_length_words,
+            &blob_crc,
+            &write_count
+        );
+        ev_count = append_store_digest_page(
+            ev,
+            ev_count,
+            (int)(sizeof(ev) / sizeof(ev[0])),
+            record_checksum,
+            blob_length_words,
+            blob_crc,
+            write_count
+        );
+        for (int i = 0; i < ev_count; i++) {
+            publish(ev[i]);
         }
     }
 #endif

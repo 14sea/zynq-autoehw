@@ -886,6 +886,69 @@ class UartStreamV2HeadroomTest(unittest.TestCase):
         )
         self.assertEqual(check.stdout.strip(), "PASS")
 
+    def test_m1_store_digest_and_replay_bundle_round_trip(self):
+        if not BOARD.exists() or not V2_C_TWIN.exists():
+            self.skipTest("board host CLI or v2 C twin not built")
+
+        digest = subprocess.run(
+            [str(BOARD), "--store-digest-smoke"],
+            cwd=ROOT,
+            check=True,
+            text=True,
+            capture_output=True,
+        )
+        digest_words = [int(line, 16) for line in digest.stdout.strip().splitlines()]
+        self.assertEqual(digest_words[0], 0xC00F0008)
+        digest_check = subprocess.run(
+            ["python3", "host/check_store_digest_mailbox.py"],
+            cwd=ROOT,
+            input=digest.stdout,
+            check=True,
+            text=True,
+            capture_output=True,
+        )
+        self.assertTrue(digest_check.stdout.startswith("PASS "))
+
+        store_words = subprocess.run(
+            [str(BOARD), "--dump-store-window"],
+            cwd=ROOT,
+            check=True,
+            text=True,
+            capture_output=True,
+        )
+        store_path = ROOT / "build" / "host" / "m1_store_words.hex"
+        bundle_path = ROOT / "build" / "host" / "m1_replay_bundle.json"
+        store_path.write_text(store_words.stdout)
+        assembled = subprocess.run(
+            [
+                "python3",
+                "host/assemble_replay_bundle.py",
+                str(store_path),
+                "--hex-words",
+                "--out",
+                str(bundle_path),
+            ],
+            cwd=ROOT,
+            check=True,
+            text=True,
+            capture_output=True,
+        )
+        self.assertEqual(assembled.stdout, "")
+        bundle = json.loads(bundle_path.read_text())
+        self.assertEqual(bundle["schema"], "replay_bundle")
+        self.assertEqual(bundle["schema_version"], "1.1.0")
+        self.assertEqual(bundle["search"]["variant"], "pbil_island8_graded_v9")
+        self.assertEqual(bundle["search"]["search_seed"], "0xb17d")
+        self.assertEqual(bundle["write_budget"]["write_count"], 1)
+        verify = subprocess.run(
+            ["python3", "host/verify_replay_bundle.py", str(bundle_path), "--cli", str(V2_C_TWIN)],
+            cwd=ROOT,
+            check=True,
+            text=True,
+            capture_output=True,
+        )
+        self.assertEqual(verify.stdout.strip(), "PASS")
+
 
 if __name__ == "__main__":
     unittest.main()

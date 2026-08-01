@@ -67,8 +67,14 @@ connect_bd_net [get_bd_pins rst_0/peripheral_aresetn] [get_bd_pins fb_0/s_axi_ar
 connect_bd_intf_net [get_bd_intf_pins axi_ic_0/M02_AXI] [get_bd_intf_pins fb_0/s_axi]
 create_bd_port -dir I -from 10 -to 0 fb_rd_addr
 create_bd_port -dir O -from 31 -to 0 fb_rd_data
+create_bd_port -dir I -from 10 -to 0 fb_wr_addr
+create_bd_port -dir I -from 31 -to 0 fb_wr_data
+create_bd_port -dir I fb_wr_en
 connect_bd_net [get_bd_ports fb_rd_addr] [get_bd_pins fb_0/rd_addr]
 connect_bd_net [get_bd_ports fb_rd_data] [get_bd_pins fb_0/rd_data]
+connect_bd_net [get_bd_ports fb_wr_addr] [get_bd_pins fb_0/wr_addr]
+connect_bd_net [get_bd_ports fb_wr_data] [get_bd_pins fb_0/wr_data]
+connect_bd_net [get_bd_ports fb_wr_en]   [get_bd_pins fb_0/wr_en]
 connect_bd_net [get_bd_ports mbox_i]       [get_bd_pins axi_gpio_0/gpio_io_i]
 connect_bd_net [get_bd_ports mbox_valid_i] [get_bd_pins axi_gpio_0/gpio2_io_i]
 assign_bd_address
