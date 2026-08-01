@@ -1,9 +1,7 @@
--- axil_framebuf.vhd - AXI4-Lite slave backing a 2**ADDR_BITS x 32 RAM, with a
--- second NEORV32 port (registered read plus full-word write). The PS stages ICAP
--- frame-write sequences here over AXI; NEORV32 reads them (rd_addr/rd_data,
--- 1-cycle registered) and, for zynq-autoehw M1 addendum, writes a board-origin
--- champion/replay record into the high half of the same RAM. Single FCLK0 clock
--- domain on both ports.
+-- axil_framebuf.vhd - AXI4-Lite slave backing two disjoint 32-bit RAM windows.
+-- Low half: PS-written parameter/restore RAM. High half: NEORV32-written
+-- board-origin champion/replay store. Each half has exactly one writer and two
+-- readers, preserving a Vivado-supported BRAM template.
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -36,8 +34,7 @@ entity axil_framebuf is
     -- NEORV32 registered read port
     rd_addr       : in  std_logic_vector(ADDR_BITS-1 downto 0);
     rd_data       : out std_logic_vector(31 downto 0);
-    -- NEORV32 full-word write port. Address policy is enforced by the SoC
-    -- decoder; this RAM intentionally does not arbitrate policy.
+    -- NEORV32 full-word write port into the high-half store window.
     wr_addr       : in  std_logic_vector(ADDR_BITS-1 downto 0) := (others => '0');
     wr_data       : in  std_logic_vector(31 downto 0) := (others => '0');
     wr_en         : in  std_logic := '0'
@@ -46,13 +43,20 @@ end entity;
 
 architecture rtl of axil_framebuf is
   constant DEPTH : natural := 2 ** ADDR_BITS;
-  type ram_t is array(0 to DEPTH-1) of std_logic_vector(31 downto 0);
-  signal ram : ram_t := (others => (others => '0'));
+  constant HALF_DEPTH : natural := DEPTH / 2;
+  type ram_t is array(0 to HALF_DEPTH-1) of std_logic_vector(31 downto 0);
+  signal param_ram : ram_t := (others => (others => '0'));
+  signal store_ram : ram_t := (others => (others => '0'));
 
   signal awready_r, wready_r, bvalid_r : std_logic := '0';
   signal arready_r, rvalid_r           : std_logic := '0';
   signal rdata_r                       : std_logic_vector(31 downto 0) := (others => '0');
   signal rd_data_r                     : std_logic_vector(31 downto 0) := (others => '0');
+
+  function low_index(addr : std_logic_vector(ADDR_BITS-1 downto 0)) return integer is
+  begin
+    return to_integer(unsigned(addr(ADDR_BITS-2 downto 0)));
+  end function;
 begin
   s_axi_awready <= awready_r;
   s_axi_wready  <= wready_r;
@@ -66,8 +70,9 @@ begin
 
   -- write channel: accept aw+w together, write RAM, single bresp
   wr: process(s_axi_aclk)
-    variable wi : integer range 0 to DEPTH-1;
-    variable nwi : integer range 0 to DEPTH-1;
+    variable word_addr : std_logic_vector(ADDR_BITS-1 downto 0);
+    variable wi : integer range 0 to HALF_DEPTH-1;
+    variable nwi : integer range 0 to HALF_DEPTH-1;
   begin
     if rising_edge(s_axi_aclk) then
       if s_axi_aresetn = '0' then
@@ -77,26 +82,31 @@ begin
         if (s_axi_awvalid = '1' and s_axi_wvalid = '1' and awready_r = '0'
             and wready_r = '0' and bvalid_r = '0') then
           awready_r <= '1'; wready_r <= '1';
-          wi := to_integer(unsigned(s_axi_awaddr(ADDR_BITS+1 downto 2)));
-          for b in 0 to 3 loop
-            if s_axi_wstrb(b) = '1' then
-              ram(wi)(b*8+7 downto b*8) <= s_axi_wdata(b*8+7 downto b*8);
-            end if;
-          end loop;
+          word_addr := s_axi_awaddr(ADDR_BITS+1 downto 2);
+          if word_addr(ADDR_BITS-1) = '0' then
+            wi := low_index(word_addr);
+            for b in 0 to 3 loop
+              if s_axi_wstrb(b) = '1' then
+                param_ram(wi)(b*8+7 downto b*8) <= s_axi_wdata(b*8+7 downto b*8);
+              end if;
+            end loop;
+          end if;
           bvalid_r <= '1';
         elsif (bvalid_r = '1' and s_axi_bready = '1') then
           bvalid_r <= '0';
         end if;
-        if wr_en = '1' then
-          nwi := to_integer(unsigned(wr_addr));
-          ram(nwi) <= wr_data;
+        if wr_en = '1' and wr_addr(ADDR_BITS-1) = '1' then
+          nwi := low_index(wr_addr);
+          store_ram(nwi) <= wr_data;
         end if;
       end if;
     end if;
   end process;
 
-  -- read channel (AXI side, for debug)
+  -- read channel (AXI side, for debug and PS fatwrite)
   rd: process(s_axi_aclk)
+    variable word_addr : std_logic_vector(ADDR_BITS-1 downto 0);
+    variable ri : integer range 0 to HALF_DEPTH-1;
   begin
     if rising_edge(s_axi_aclk) then
       if s_axi_aresetn = '0' then
@@ -105,7 +115,13 @@ begin
         arready_r <= '0';
         if (s_axi_arvalid = '1' and arready_r = '0' and rvalid_r = '0') then
           arready_r <= '1';
-          rdata_r   <= ram(to_integer(unsigned(s_axi_araddr(ADDR_BITS+1 downto 2))));
+          word_addr := s_axi_araddr(ADDR_BITS+1 downto 2);
+          ri := low_index(word_addr);
+          if word_addr(ADDR_BITS-1) = '1' then
+            rdata_r <= store_ram(ri);
+          else
+            rdata_r <= param_ram(ri);
+          end if;
           rvalid_r  <= '1';
         elsif (rvalid_r = '1' and s_axi_rready = '1') then
           rvalid_r <= '0';
@@ -116,9 +132,15 @@ begin
 
   -- NEORV32 read port (registered, 1-cycle latency)
   nrd: process(s_axi_aclk)
+    variable ri : integer range 0 to HALF_DEPTH-1;
   begin
     if rising_edge(s_axi_aclk) then
-      rd_data_r <= ram(to_integer(unsigned(rd_addr)));
+      ri := low_index(rd_addr);
+      if rd_addr(ADDR_BITS-1) = '1' then
+        rd_data_r <= store_ram(ri);
+      else
+        rd_data_r <= param_ram(ri);
+      end if;
     end if;
   end process;
 end architecture;

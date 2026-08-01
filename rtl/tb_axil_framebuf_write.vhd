@@ -80,6 +80,14 @@ begin
     wait until rising_edge(clk);
     assert rddata = x"43484D50" report "NEORV32 write/readback mismatch" severity failure;
 
+    araddr  <= std_logic_vector(to_unsigned(1024 * 4, 13));
+    arvalid <= '1';
+    wait until rising_edge(clk);
+    arvalid <= '0';
+    wait until rising_edge(clk);
+    assert rdata = x"43484D50" report "AXI high-half store readback mismatch" severity failure;
+    assert rvalid = '1' report "AXI high-half read did not produce rvalid" severity failure;
+
     awaddr  <= std_logic_vector(to_unsigned(4, 13));
     wdata   <= x"11223344";
     wstrb   <= "1111";

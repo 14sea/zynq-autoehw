@@ -273,3 +273,18 @@ ABI rule.
 
 No DFX build, no bitstream, no board: the gate stopped here. `525ccaa` stays
 local and unpushed.
+
+### Follow-up RTL fix submitted after HOLD (pending OOC)
+
+The follow-up keeps the param/restore RAM and the board-store RAM as two
+separate arrays:
+
+- low half (`0..1023`): PS-written parameter/restore RAM, NEORV32-readable;
+- high half (`1024..2047`): NEORV32-written board-store RAM, PS- and
+  NEORV32-readable.
+
+This removes the second writer from the original RAM template while preserving
+the existing address convention (`0x40000000` low half for restore,
+`0x40001000` high half for `fatwrite`). GHDL behavioural smoke covers
+NEORV32-write/NEORV32-read, NEORV32-write/AXI-read, and AXI-write/NEORV32-read.
+It is **not** an OOC PASS claim until Vivado confirms BRAM inference.
