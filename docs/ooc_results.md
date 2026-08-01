@@ -438,3 +438,60 @@ the actual consumer:
 This resolves the false-green text-only test gap. RTL OOC remains the already
 measured 222c51b result (72 LUT / 0 LUTRAM / 4 BRAM); the remaining gate is a
 fresh firmware/DFX build and the physical NV round trip on the 4203.
+
+### Round 4 (commit b78dfcc) — restore reader OK, **board firmware does not compile**
+
+RTL untouched this round (`git diff 222c51b b78dfcc -- external/shell rtl/` is
+empty), so the round-3 framebuf OOC PASS stands. Host gate reproduced: 44 tests
+OK. The restore reader itself reviewed and correct — reads low-half words 0..15,
+validates magic + `0x00020000` + the 16-word checksum, rejects a raw genome
+wider than 39 bits, decodes losslessly.
+
+**Blocker: `AUTOEHW_BOARD_STORE_DIGEST_MODE` fails to build for the board.**
+
+```
+autoehw_board_mbox.c:1379: error: 'board_eval_frame_graded' undeclared
+autoehw_board_mbox.c:1399: error: 'publish_v9_confirm_progress' undeclared
+```
+
+The new board block at line 1376 uses two helpers whose *definitions* are still
+guarded for V9-confirm only:
+
+| line | guard | needs |
+|---|---|---|
+| 602 | `#if defined(AUTOEHW_HOST_STUB) \|\| defined(AUTOEHW_BOARD_V9_CONFIRM_MODE)` | `\|\| defined(AUTOEHW_BOARD_STORE_DIGEST_MODE)` |
+| 934 | `#if defined(AUTOEHW_HOST_STUB) \|\| defined(AUTOEHW_BOARD_V9_CONFIRM_MODE)` | same |
+| 956 | already includes `AUTOEHW_BOARD_STORE_DIGEST_MODE` | — |
+
+One of the three guards was updated and two were not. **No host-side gate can
+see this**: the stub build defines `AUTOEHW_HOST_STUB`, which pulls both helpers
+in regardless. Only the cross-compiled board firmware exposes it.
+
+**Second finding — the board mode would cost 2 h per iteration.** The
+`STORE_DIGEST` block derives a full budget from measured throughput
+(`v9_confirm_arm_budget(measure_v9_graded_evals_per_sec(...))`), i.e. it re-runs
+the whole ~2 h Set B confirm before it writes the store. The existing smoke
+paths use `AUTOEHW_V9_CONFIRM_SMOKE_BUDGET = 8`. The NV claim does not depend on
+run length, and the round trip needs `store → fatwrite → power cycle → fatload →
+restore` iterated in minutes. Recommend the store-digest board mode use the
+smoke budget (or a build-time switch), keeping a long variant for later if
+wanted.
+
+**Third finding (host-only, no rebuild needed) — the checker still trusts a
+board-computed flag.** Negative controls run against
+`check_store_digest_mailbox.py`:
+
+| control (page checksum recomputed each time, so the page is internally valid) | expected | actual |
+|---|---|---|
+| restore status cleared, `--require-restore` | FAIL | **FAIL** ✓ `restore status mismatch` |
+| restore status cleared, no flag | PASS reporting `restore=no` | **PASS, restore=no** ✓ |
+| **restored genome word flipped, status still claims restored+matches** | FAIL | **PASS** ✗ |
+
+So the checker verifies that the board *claims* a matching restore, but never
+compares the reported restored genome against the stored one. Given the standing
+rule in this repo — recompute host-side, never fixed-compare a host fake — the
+checker should cross-check payloads 9/10 against the stored raw genome rather
+than trusting the match bit.
+
+**Gate decision:** no DFX build. Firmware does not compile for the board, and
+firmware is baked into the bitstream.
