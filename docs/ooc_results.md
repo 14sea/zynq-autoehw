@@ -361,3 +361,58 @@ board-written store dump to the low-half post-power-cycle restore input.
 
 GHDL behavioural smoke and `make all` pass locally. This remains **pending OOC**
 until Vivado confirms BRAM inference and resource use.
+
+### Round 3 (commit 222c51b) — **framebuf OOC PASS**
+
+| variant | LUT | LUT as Memory | FF | BRAM | err / crit |
+|---|---|---|---|---|---|
+| baseline | 5 | 0 | 4 | 4 | 0 / 0 |
+| **222c51b** | **72** | **0** | 6 | **4** | **0 / 0** |
+
+Matches gate probe D (70 LUT) — read muxes now sit after the RAM output
+registers, block RAM inference is restored, no distributed RAM. The framebuf
+change is clear to go into a DFX build. Host gate independently reproduced:
+44 tests OK.
+
+### Round 3 blocker — the NV round trip does not close, and the new test hides it
+
+`host/m1_persist_framebuf_words.py --from-store-hex` **byte-copies** the 16-word
+v2 store record into low-half words 0..15. Verified by running it against a real
+`--dump-store-window` dump: the emitted words are the v2 record verbatim,
+starting `mw.l 0x40000000 0x43484d50` / `mw.l 0x40000004 0x00020000`.
+
+The only firmware reader of the low half is `load_persisted_champion()`, which
+reads words 0..4 and requires
+
+```c
+#define AUTOEHW_CHAMPION_STORE_VERSION 0x00010000u
+...
+(meta & 0xFFFF0000u) != AUTOEHW_CHAMPION_STORE_VERSION   ->  reject
+```
+
+The converted record presents `0x00020000` in that position, and the v1 layout
+(word 1 = `meta`, word 2 = packed config, word 4 = checksum) does not match the
+v2 layout at all. **The firmware will reject every restore produced by this
+tool** — so `store → fatwrite → power cycle → fatload → restore`, the entire
+point of the addendum, cannot close.
+
+The new assertions do not catch it because they only check the emitted *text*
+(16 lines, first two words, last address, and that `--from-store-hex` agrees
+with the `md`-format parser). Nothing asserts that a restore actually happens.
+
+**Recommended fix — firmware side, not converter side.** The v1 restore ABI
+carries a `SamplerConfig` (phase / threshold / majority window) while a v2
+champion is a 39-bit genome, so a v2→v1 conversion is lossy by construction and
+must not be attempted. Instead give the firmware a **v2-aware restore reader at
+low-half base 0** (validate magic + `0x00020000` + the 16-word checksum,
+dispatch on the version word, keep v1 for the historical fixture). The
+converter's byte-copy then becomes correct as delivered.
+
+**Test requirement:** the round-trip test must drive the *restore*, not the text
+— seed the host stub's low half with the converted words, run the restore path,
+and assert the recovered champion equals the stored one. A green test over
+formatting is what let this through.
+
+**Gate decision:** no DFX build yet. The fix changes firmware, firmware is baked
+into the bitstream's BRAM INIT, so a build now would be thrown away. Building
+when the restore reader lands.
