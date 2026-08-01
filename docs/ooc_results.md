@@ -288,3 +288,60 @@ the existing address convention (`0x40000000` low half for restore,
 `0x40001000` high half for `fatwrite`). GHDL behavioural smoke covers
 NEORV32-write/NEORV32-read, NEORV32-write/AXI-read, and AXI-write/NEORV32-read.
 It is **not** an OOC PASS claim until Vivado confirms BRAM inference.
+
+### Round 2 — split RAMs (commit 48b6f0a) — **still OOC FAIL**, cause isolated
+
+Splitting into `param_ram` / `store_ram` removed the register explosion but the
+array still does not reach block RAM:
+
+| variant | LUT | LUT as Memory | FF | BRAM |
+|---|---|---|---|---|
+| baseline | 5 | 0 | 4 | **4** |
+| 525ccaa (shared array, two writers) | 123 215 | 0 | 65 604 | 0 |
+| **48b6f0a (split arrays)** | **3 958** | **3 456** | 68 | **0** |
+| gate probe D: 48b6f0a + mux moved after the registers | **70** | **0** | 6 | **4** |
+
+**Cause, isolated and verified by probe D:** both read processes select between
+the two arrays *before* the output register —
+
+```vhdl
+if rd_addr(ADDR_BITS-1) = '1' then rd_data_r <= store_ram(ri);
+else                              rd_data_r <= param_ram(ri); end if;
+```
+
+so one register is fed by two different memories and neither matches a RAM
+template; Vivado falls back to distributed RAM (3 456 LUT of LUTRAM). Probe D
+changes nothing else — same split, same address policy, same ports — and only
+gives each array its **own** output register, muxing afterwards:
+
+```vhdl
+rd_param <= param_ram(ri);   rd_store <= store_ram(ri);
+nrsel_r  <= rd_addr(ADDR_BITS-1);
+...
+rd_data  <= rd_store when nrsel_r = '1' else rd_param;
+```
+
+Result: **4 BRAM, 0 LUTRAM, 70 LUT** — back to the baseline tile count, +65 LUT
+for the two post-register muxes. Same treatment is needed on the AXI read
+(`rdata_param` / `rdata_store` + `rsel_r`).
+
+**Rule for this file: each RAM read lands in its own dedicated register; the
+half-select mux happens after the registers, never before.**
+
+### Address directions — now correct
+
+Re-audited against the firmware, both constraints from round 1 hold in 48b6f0a:
+
+- board store base = word **1024** (high half) → NEORV32 write is permitted, and
+  `champion_store_v2_current_write_count()` can read it back because the NEORV32
+  read port now spans both halves.
+- v1 restore reads words **0..4** (low half), which is where the PS can write —
+  so store (board→PS) and restore (PS→board) no longer collide.
+
+### Remaining functional gap (not an OOC matter)
+
+Nothing converts a flushed v2 store back into low-half restore words:
+`host/m1_persist_framebuf_words.py` still builds them from a hand-written
+`SamplerConfig`. Until that exists the NV round trip
+(store → `fatwrite` → power cycle → `fatload` → restore) cannot be closed on the
+board, which is the whole point of the addendum.
