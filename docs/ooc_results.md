@@ -214,3 +214,62 @@ quadrant pblock, and comfortably inside the current tracked pblock
 Slice-packing pressure is essentially unchanged from the board-proven
 smoke-#3 build (FF count +~60). No DFX rebuild risk indicated. Board-facing
 firmware/golden prereg may proceed.
+
+---
+
+## M1 addendum framebuf write port (commit 525ccaa) — **OOC HOLD / FAIL** (gatekeeper run 2026-08-01)
+
+The delivered `external/shell/axil_framebuf.vhd` adds the NEORV32 write inside
+the existing AXI write process. Behaviourally correct (GHDL smoke passes), but
+**it does not synthesize**: Vivado cannot map two independent write sources onto
+the RAM and dissolves the whole 2048×32 array into flip-flops.
+
+```
+WARNING: [Synth 8-4767]  Trying to implement RAM 'ram_reg' in registers.
+                         Block RAM or DRAM implementation is not possible
+WARNING: [Synth 8-13159] ... dissolved into (65536) registers bits
+```
+
+| variant | LUT | FF | BRAM | verdict |
+|---|---|---|---|---|
+| baseline (`zynq_ehw/rtl/axil_framebuf.vhd`) | 5 (0.03 %) | 4 | **4** | reference |
+| **delivered 525ccaa** | **123 215 (700 %)** | 65 604 (186 %) | **0** | **unbuildable** |
+| gate probe A: shared-variable TDP, 1 process/port | — | — | — | `ERROR [Synth 8-2914] Unsupported RAM template` |
+| gate probe B: two half-size arrays, both read twice | 3 960 (22.5 %) | 101 | 0 | LUTRAM, still no BRAM |
+| **gate probe C: param RAM untouched + separate store RAM** | **38** | 5 | **5** | **infers BRAM — viable direction** |
+
+**Root cause.** A BRAM port carries one address bus, so a block RAM offers two
+addresses total. The original topology is 1 write / 2 reads (AXI write, AXI
+read, NEORV32 read) and Vivado satisfies it by replicating into 4 tiles. Adding
+a second *write* source creates four independent addresses with two writers,
+which no supported template covers. This is invisible to behavioural simulation
+— the same class as the M1 smoke-#1 XBUS handshake and the smoke-#2 arithmetic
+divergence.
+
+**Viable direction (probe C, measured):** leave the PS param RAM byte-identical
+— its topology and its board-verified PS path are then untouched by
+construction — and add a *separate* store array for the board-origin record,
+written by NEORV32 and read over AXI, muxed into the AXI read data by the
+address MSB. Cost over baseline: **+1 BRAM tile, +33 LUT**.
+
+Two constraints probe C must still satisfy, both found by reading the delivered
+firmware rather than the RTL:
+
+1. `champion_store_v2_current_write_count()` reads the record back, so the store
+   array needs the **NEORV32 read port too** (1 write / 2 reads, i.e. the same
+   topology the param RAM already proves) — not the write-only SDP of probe C.
+   Expect one or two more tiles; there are 60.
+2. The store and the restore paths are **different directions and must not share
+   an address region**: restore is PS→board (PS writes over AXI, firmware reads)
+   and stays in the param RAM; store is board→PS. The delivered firmware uses
+   one `AUTOEHW_FRAMEBUF_BOARD_STORE_WORD` base for both, which the split
+   topology cannot honour.
+
+**Also flagged (not a blocker today):** the SoC registers the write, so the RAM
+updates ~2 cycles after the XBUS write is acked. A read-back placed immediately
+after a write would return stale data. Today's firmware appears to read the
+write count *before* writing, which is safe — keep that order and state it as an
+ABI rule.
+
+No DFX build, no bitstream, no board: the gate stopped here. `525ccaa` stays
+local and unpushed.
