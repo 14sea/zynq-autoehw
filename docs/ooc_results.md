@@ -573,3 +573,41 @@ shell that just passed OOC and spends ~8 more BRAM tiles for a testability
 problem. Not recommended while a trim is available.
 
 **Gate decision:** still no DFX build — there is no linkable board image.
+
+### Round-6 follow-up submitted after IMEM overflow (pending link/DFX)
+
+The STORE_DIGEST board mode now tests persistence as a persistence path, not as
+a fresh search:
+
+- The board mode no longer calls `measure_v9_graded_evals_per_sec()`,
+  `autoehw_v2_firmware_confirm_island8_graded_v9()`, graded MMIO evaluation, or
+  progress publication.
+- It emits the record/blob from the already board-verified Set B constants:
+  eps `1570`, budget `22078`, variant raw `0x7c009161b2`, random raw
+  `0x06c219610c`, hard holdouts `128/1024` and `15/1024`, graded holdouts
+  `382336` and `332459`, and board-convention frame evals `5651968`.
+- The STORE_DIGEST block now owns its carousel and does not fall through into
+  the legacy M1 main loop.
+- Unused page helpers are guarded by their actual modes, so the STORE_DIGEST
+  board translation unit only references `uart_v2_encode_genome()` and
+  `uart_v2_decode_genome()` from the v2 library.
+
+Local compile-only evidence:
+
+```text
+riscv64-unknown-elf-gcc ... -DAUTOEHW_BOARD_STORE_DIGEST_MODE -c sw/autoehw_board_mbox.c
+PASS
+
+size -A /tmp/autoehw_board_store_digest.o
+.text 1320
+.rodata 88
+Total 1490
+
+nm -u /tmp/autoehw_board_store_digest.o
+U uart_v2_decode_genome
+U uart_v2_encode_genome
+```
+
+This does not replace Claude's full NEORV32 link, but it shows the overflow
+cause has been removed from this translation unit: no PBIL/search/evaluator
+symbols remain live in STORE_DIGEST mode.
