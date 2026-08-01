@@ -1,6 +1,8 @@
-import serial,re,time
-PROMPT=b"zynq-uboot>"; pat=re.compile(rb"41200000:\s+([0-9a-fA-F]{8})")
-s=serial.Serial("/dev/ebaz-uart",115200,timeout=0.4)
+import serial,re,time,sys
+sys.path.insert(0, __file__.rsplit("/",1)[0])
+from board_serial import BAUD, PORT, PROMPT_RE
+pat=re.compile(rb"41200000:\s+([0-9a-fA-F]{8})")
+s=serial.Serial(PORT,BAUD,timeout=0.4)
 t0=time.time(); last=None; trans=[]
 while time.time()-t0<75:
     s.reset_input_buffer(); s.write(b"md 0x41200000 1\r")
@@ -9,7 +11,7 @@ while time.time()-t0<75:
         c=s.read(256)
         if c:
             out+=c
-            if PROMPT in out: break
+            if PROMPT_RE.search(out): break
     m=pat.search(out)
     if m:
         v=m.group(1).decode().lower()

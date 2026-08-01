@@ -11,17 +11,17 @@
   after HARD_LIMIT_S.
 """
 import serial, re, time, sys
+sys.path.insert(0, __file__.rsplit("/",1)[0])
+from board_serial import BAUD, PORT, PROMPT_RE
 
-PROMPT=b"zynq-uboot>"
 pat=re.compile(rb"41200000:\s+([0-9a-fA-F]{8})")
 STUCK_S=90         # heartbeat every ~10s; 90s without change = stuck alert
 HARD_LIMIT_S=9600  # 2h40m absolute cap
-PORT="/dev/ebaz-uart"
 
 def open_port():
     while True:
         try:
-            return serial.Serial(PORT,115200,timeout=0.4)
+            return serial.Serial(PORT,BAUD,timeout=0.4)
         except Exception:
             time.sleep(1.0)
 
@@ -40,7 +40,7 @@ while time.time()-t0 < HARD_LIMIT_S:
             c=s.read(256)
             if c:
                 out+=c
-                if PROMPT in out: break
+                if PROMPT_RE.search(out): break
         m=pat.search(out)
         if m:
             v=m.group(1).decode().lower()

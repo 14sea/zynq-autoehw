@@ -775,3 +775,110 @@ scope for M1.
 
 Full-M1 engineering remainder (unchanged): NV champion store, board-side
 replay bundle emission.
+
+---
+
+## ★★★ Set B CROSS-CHIP REPRODUCTION on a second board — EBAZ4203 (2026-08-01)
+
+The same `dfx_top.bit` that produced the 2026-07-11 Set B confirmation, re-run
+on a **different die in a different board design**: an EBAZ4203 (XC7Z010CLG400-1,
+same part number as the 4205), TF-card boot, U-Boot SPL + mainline U-Boot
+2026.04-rc5, **no Xilinx FSBL anywhere**. Board `17A6`, console CH340
+`/dev/ebaz-uart`.
+
+### Bitstream provenance (established before the run — the whole argument rests on it)
+
+The firmware mode is baked into BRAM INIT and is invisible from the `.bit`, so
+provenance was established four ways, no rebuild:
+
+| evidence | value | matches |
+|---|---|---|
+| `dfx_top.bit` md5 | `4b823f543f67d5613376354764c56a85` | the Set B record above (`4b823f543f67…`) ✓ |
+| `.bit` header | `dfx_top` / `7z010clg400` / Vivado 2025.2 / `2026/07/11 09:01:02` | Set B build day ✓ |
+| IMEM image | `external/fw_build/neorv32_imem_image.vhd` md5-identical to the installed `external/neorv32/rtl/core/neorv32_imem_image.vhd`, `image_size_c = 15968` | recorded firmware size 15,968 B ✓ |
+| firmware mode | ELF defines the V9-gated symbols `publish_v9_confirm_progress` / `append_v9_confirm_arm_page`, and defines **no** `LONGRUN` / `GRADED_SMOKE` / `V2_AB` mode symbols | `AUTOEHW_BOARD_V9_CONFIRM_MODE` ✓ |
+
+### Loader port (4205 → 4203)
+
+`/dev/ebaz-uart` already follows either board's CH340, so the port name did not
+change — the prompt and the clock check did:
+
+- `scripts/board_serial.py` (new): `PROMPT_RE` matches **both** `zynq-uboot>`
+  (4205 vendor U-Boot) and `Zynq>` (4203 mainline U-Boot). `board_mbox_cadence.py`
+  and `board_longrun_monitor.py` now use it; `scripts/board_uboot_fpga_load.py`
+  is the zynq_xpart loader ported in so the board flow is self-contained.
+- **`scripts/board_set_fclk50.py` (new) — the trap that a constant-compare would
+  have walked into.** The 4205 pins FCLK0 by writing the magic `0x00200a00`
+  (IO PLL 1000 / 10 / 2). The 4203's IO PLL is **1600 MHz** and its vendor
+  `ps7_init` already gives `FPGA0_CLK_CTRL = 0x00400800` = 1600/8/4 = 50 MHz.
+  Writing the 4205 magic onto a 4203 would have produced **80 MHz** — silently
+  out of signoff, the exact failure class of EHW-5.2. The new script decodes the
+  PLL registers and computes the real frequency instead of comparing a constant.
+  Board reading: `1600.0/8/4 = 50.00 MHz`, **PASS, no write needed**.
+
+### Load smoke
+
+`loady` → ymodem 2,083,859 B → `fpga loadb`; U-Boot echoed the header above,
+`PCFG_DONE`=1, `LVL_SHFTR_EN=0xF`, `FPGA_RST_CTRL=0`. Mailbox reads `0` for the
+first seconds after config, then starts publishing. Cadence probe: **8
+transitions in 75 s, median 10.0 s** — the same heartbeat cadence as the 4205
+Set B run. GO.
+
+Note: mainline U-Boot prints `INFO: post config was not run` — harmless here,
+the SPL's vendor `ps7_init` has already enabled the level shifters and released
+`FPGA_RST_CTRL`.
+
+### Run — bit-identical to the 4205
+
+~124 min PC-free (`T+7414s` at monitor exit; first final-carousel marker at
+`T+7044s`), **832 transitions, 0 stuck alerts, 0 serial errors**, log
+`runs/setb_4203_2026-08-01.log`.
+
+- **Final 40-word carousel is byte-identical to the 4205's**, word for word
+  (`diff` clean against the cycle reconstructed from the 2026-07-11 trace), and
+  the two captured cycles are byte-identical to each other.
+- `host/check_v9_confirm_mailbox.py` **PASS** on the 4203 capture.
+- Independent hand-decode: measured eps **1570** → board-derived budget
+  **22,078** → evals **5,651,968 = 22,078 × 256**; variant `0x7c009161b2`
+  train 83489/83968, hard holdout **128/1024**, graded 382,336; random
+  `0x06c219610c` train 38/256, hard holdout **15/1024**, graded 332,459 →
+  **Δ = +113/1024**. Every number equals the 4205's.
+- Whole-run cross-check: all **717** progress-page checksum words (`c2…`) match
+  the 4205 trace in order, zero mismatches (5-word start offset, because the
+  cadence probe ran before the monitor was armed; 4205 logged 722). The two
+  traces differ only in which
+  transient carousel words the 0.6 s poll happened to latch (sequence
+  similarity 0.966) — the published stream itself is identical.
+
+### What this adds, and what it does not
+
+**Adds:** the Set B result is not a property of one die or one board. Same
+bitstream, same seed, different silicon, different boot chain (TF-card U-Boot
+SPL vs miner NAND FSBL) → identical measured throughput, identical derived
+budget, identical champions, identical holdout scores.
+
+**Does not add:** this is a *reproduction*, not a new confirmation. Seed 0xB17D
+stays spent; it buys no additional statistical evidence for beats-random. The
+architecture was deliberately untouched (brain stays NEORV32) precisely so this
+would remain a cross-chip reproduction rather than a different experiment.
+
+New tooling: `scripts/board_carousel_extract.py` rebuilds a carousel
+POSITIONALLY from a monitor trace (never from a first-seen set) and reports
+whether repeated cycles are byte-identical.
+
+### The 40 words (identical on both boards)
+
+Recorded here because the raw traces live under gitignored `runs/` and `build/`.
+
+```text
+a7000000 ad00b17d
+c00a0008 c10a0078 c1400622 c1800100 c1c0563e c1000000 c140003d c1800000 c1c02000 c2affa59
+c00b000c c10b0008 c15161b2 c181f002 c1c14621 c1000000 c1414800 c1800000 c1c80400 c105d580
+         c1400000 c1963e00 c1c00001 c2a5ba98
+c00c000c c10b0002 c159610c c1801b08 c1c00026 c1000000 c1400100 c1800000 c1c0f400 c10512ab
+         c1400000 c1963e00 c1c00001 c2a46e0a
+```
+
+Page 10 = calibration (eps `0x622` = 1570, budget `0x563e` = 22,078), page 11 =
+variant arm 8, page 12 = random arm 2; `c1c80400` / `c1c0f400` are the packed
+hard holdouts 128/1024 and 15/1024.
