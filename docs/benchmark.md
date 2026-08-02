@@ -405,6 +405,6 @@ Board confirmation (`docs/board_results.md`, commit `27bc3d1`):
 | hard holdout delta | `+113/1024` |
 
 This closes the M1 beats-random gate for this benchmark/regime. It does not
-close Claim B, does not claim cross-benchmark transfer, and does not replace the
-remaining engineering tasks of NV champion storage and board-side replay-bundle
-emission.
+close Claim B and does not claim cross-benchmark transfer. The engineering tasks
+of NV champion storage and board-side replay-bundle emission were separate from
+this gate and are closed by the M1 engineering addendum (tag `m1-eng-complete`).

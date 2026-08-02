@@ -43,7 +43,7 @@ is distinct from `zynq-ehw`, and its falsification test. These mirror
 
 | Claim | M1 status | Evidence | Scope boundary |
 |---|---|---|---|
-| **A — autonomous runtime** | **PASS for the M1 runtime core.** The board ran multi-hour autonomous search with PC out of candidate selection and fitness, board-derived budget, live heartbeat, bit-exact replay against host golden, rejection/recovery scaffolds, and no power-cycle dependency. | `docs/board_results.md` multi-hour, v2/v9, graded-smoke, and Set B confirmatory entries. | NV champion storage and board-side replay-bundle emission remain engineering remainders; existing persistence evidence is a static-shell RAM restore ABI plus host-side replay fixtures. |
+| **A — autonomous runtime** | **PASS for the M1 runtime core.** The board ran multi-hour autonomous search with PC out of candidate selection and fitness, board-derived budget, live heartbeat, bit-exact replay against host golden, rejection/recovery scaffolds, and no power-cycle dependency. | `docs/board_results.md` multi-hour, v2/v9, graded-smoke, and Set B confirmatory entries. | NV champion storage and board-side replay-bundle emission were engineering remainders at `m1-complete`; both are **closed by the M1 engineering addendum** (`docs/m1_eng_addendum.md`, board evidence in `docs/board_results.md`, tag `m1-eng-complete`). Scope of that closure: store and restore both run through U-Boot on TF-card FAT with a frozen Set B champion constant — not autonomous reflashing, and no write-endurance study. |
 | **B — map-guided evolution** | **NOT TESTED in M1.** | None claimed. | Reserved for M2/local-map work. Current M1 result is search over a constrained genome, not a learned device-local map. |
 | **C — held-out improvement** | **PASS for the M1 beats-random holdout subclaim on one benchmark/regime.** The final pre-registered Set B board run beat equal-budget random on 1024-frame hard holdout by `+113/1024`. | `docs/prereg_search_v9_graded_islands.md`, `docs/screening_v9_results.md`, `docs/v9_setb_confirm_golden.md`, and `docs/board_results.md`. | The broad Claim C wording still requires careful scope: this is one UART-like benchmark family, one budget regime, and the winning condition was discovered as graded train signal + K=8 PBIL islands through v3-v9 screening. It is not a claim of cross-device, cross-task, or adversarial-set generalization. |
 
@@ -213,9 +213,11 @@ search at equal budget · persistence writes unbounded / no wear budget.
 remainders.** The board evidence satisfies the PC-free runtime, measured budget,
 long-run telemetry, equal-budget random baseline, hard-holdout win, deterministic
 host replay, and bad-candidate/recovery scaffold requirements. Champion restore
-across logic reset and host-side replay fixtures are demonstrated, but the
-non-volatile champion store and board-side replay-bundle emitter remain
-engineering items. Claim B is outside M1.
+across logic reset and host-side replay fixtures are demonstrated. The
+non-volatile champion store and the board-side replay-bundle emitter were left
+as engineering items at this tag and were **closed afterwards by the M1
+engineering addendum** (tag `m1-eng-complete`, 2026-08-01/02) — this verdict at
+`27bc3d1` is left as it stood. Claim B is outside M1.
 
 ### M2 — cyclone-fabric-cartographer (separate repo)
 
@@ -312,13 +314,25 @@ Honest scope:
   16-seed Set A evidence, not an independent large-sample replication study.
 - Claim B remains untested.
 
-Engineering remainder:
+Engineering remainder (**both closed after this tag** — see the M1 engineering
+addendum, tag `m1-eng-complete`):
 
-- Implement true non-volatile champion storage with a named physical store and
-  enforced write budget.
-- Emit the replay bundle from the board side, not only from host fixtures.
+- ~~Implement true non-volatile champion storage with a named physical store and
+  enforced write budget.~~ **Closed.** TF-card FAT (`champ.bin`, 160 B) written
+  from U-Boot; verified across a physical power cycle; `write_count` 1 → 2 across
+  the restore. The budget is enforced by firmware plus the flush step, not by
+  hardware.
+- ~~Emit the replay bundle from the board side, not only from host fixtures.~~
+  **Closed.** The 40-word board-written store window assembles into a
+  `replay_bundle` 1.1.0 that the host C twin replays independently, bit-exact on
+  both arms.
 - Optionally clean up confirm-firmware bookkeeping that evaluated island-local
   holdout data then discarded it for the frozen final-report ABI.
+- Still open, and separate from the addendum: the routed design reports
+  WNS ≈ −19 ns against a real 50 MHz constraint on a pre-existing `eval_core`
+  path. Every board result is bit-exact regardless, across two dice, but the
+  reason is not demonstrated anywhere — the likely multicycle nature of that path
+  should be established and constrained rather than left as folklore.
 
 ---
 

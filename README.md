@@ -34,7 +34,7 @@ screen. It is not a claim of cross-benchmark transfer or a local-map result.
 
 | Claim | M1 status |
 |---|---|
-| **A: autonomous runtime** | **PASS for the runtime core.** Multi-hour PC-free search, board-derived budget, heartbeat telemetry, bit-exact host replay, rejection/recovery scaffolds, and no power-cycle dependency are board evidenced. NV champion storage and board-side replay-bundle emission remain engineering remainders. |
+| **A: autonomous runtime** | **PASS for the runtime core.** Multi-hour PC-free search, board-derived budget, heartbeat telemetry, bit-exact host replay, rejection/recovery scaffolds, and no power-cycle dependency are board evidenced. NV champion storage and board-side replay-bundle emission are **closed by the M1 engineering addendum** (2026-08-01/02, EBAZ4203): champion persistence across a real power loss via TF-card FAT, a replay bundle built from board-written words that the host C twin replays independently, and a write-budget counter that survives and increments across the restore. Scope stays store/restore through U-Boot with a frozen Set B champion constant — not autonomous reflashing, no write-endurance study. |
 | **B: device-local map guidance** | **NOT TESTED.** This is reserved for M2. |
 | **C: held-out improvement** | **PASS for the M1 beats-random-on-holdout subclaim.** Static-baseline, adversarial/no-reward-hack, and broader generalization-gap axes are not closed by M1. |
 
@@ -58,7 +58,9 @@ The M1 stack is a complete, evidence-bearing path from oracle to board:
 | File | Purpose |
 |---|---|
 | [`docs/tech_report.md`](docs/tech_report.md) | Claims ledger, scope, milestone criteria, and M1 closure evidence. |
-| [`docs/board_results.md`](docs/board_results.md) | Silicon results: smoke tests, long runs, graded MMIO proof, and final Set B confirmation. |
+| [`docs/board_results.md`](docs/board_results.md) | Silicon results: smoke tests, long runs, graded MMIO proof, the Set B confirmation, its bit-identical cross-chip reproduction on a second die, and the M1 engineering addendum round trip. |
+| [`docs/m1_eng_addendum.md`](docs/m1_eng_addendum.md) | The M1 engineering addendum: NV champion store and board-origin replay bundle — design, constraints, and honest scope. |
+| [`docs/ooc_results.md`](docs/ooc_results.md) | Gate record: OOC synthesis results per drop, including the framebuf write-port rounds and what each failed gate cost. |
 | [`docs/benchmark.md`](docs/benchmark.md) | Benchmark definitions, holdout firewall, v2 headroom package, and final M1 benchmark closure. |
 | [`docs/schema.md`](docs/schema.md) | Versioned contracts for genome, manifest, run log, replay bundle, safety lists, and write budget. |
 | [`docs/ooc_results.md`](docs/ooc_results.md) | Vivado OOC resource/fit gates and warnings. |
