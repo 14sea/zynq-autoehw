@@ -882,3 +882,77 @@ c00c000c c10b0002 c159610c c1801b08 c1c00026 c1000000 c1400100 c1800000 c1c0f400
 Page 10 = calibration (eps `0x622` = 1570, budget `0x563e` = 22,078), page 11 =
 variant arm 8, page 12 = random arm 2; `c1c80400` / `c1c0f400` are the packed
 hard holdouts 128/1024 and 15/1024.
+
+---
+
+## ★★★ M1 engineering addendum — NV champion store + board-origin replay bundle (EBAZ4203, 2026-08-01/02)
+
+Both M1 engineering remainders closed on silicon. Board `17A6`, bitstream
+`dfx_top.bit` md5 `2e6d7f0d5e0330729b71f17312ecd643` (0 err / 101 crit /
+0 failed nets), firmware `AUTOEHW_BOARD_STORE_DIGEST_MODE` 1 640 B,
+`verify-image` OK. FCLK0 preflight 50.00 MHz.
+
+### The round trip, step by step
+
+| # | step | evidence |
+|---|---|---|
+| 1 | `fpga loadb`, firmware boots | mailbox publishes page 15 header `c00f000b` |
+| 2 | board writes its own v2 record into the framebuf high half | `md 0x40001000` — every field equals the Set B golden (below) |
+| 3 | page 15 before any restore | payload[8] = `c1000000` → **restore=no**, honestly reported |
+| 4 | flush to NV: `cp.l 0x40001000 0x1000000 0x28` then `fatwrite mmc 0:1 0x1000000 champ.bin 0xA0` | `160 bytes written`; `fatls` shows `champ.bin` next to an untouched `BOOT.BIN` |
+| 5 | **physical power cycle** (5 V barrel unplugged) | — |
+| 6 | reload bitstream, inspect the framebuf low half | `md 0x40000000` = **all zeros** — the PL BRAM really did not survive |
+| 7 | `fatload mmc 0:1 0x1000000 champ.bin` + `cp.l 0x1000000 0x40000000 0x10` | low half reads back the record |
+| 8 | `FPGA_RST_CTRL` pulse (SLCR unlock, `0xF8000240` 0xF→0) — logic reset, BRAM preserved | firmware re-boots and validates |
+| 9 | page 15 after restore | payload[8] `c1000101` = **restored + matches**; payloads[9]/[10] `c15161b2`/`c181f002` → raw `0x7c009161b2`; write_count `1`→`2` |
+
+Board-written record, hand-decoded (`md 0x40001000 10`), against the Set B
+golden:
+
+```
+43484d50 'CHMP'      00020000 v2        2c493646/0ff54172 build_id
+0000b17d seed B17D   0000563e budget 22078
+009161b2/0000007c    raw genome 0x7c009161b2
+00014621 train 83489 00014800 total 83968
+00080400 hard holdout (128<<12)|1024     0005d580 graded 382336
+00563e00 evals 5651968 = 22078 x 256     00000001 write_count
+```
+
+Every value matches. Official checker on the post-restore carousel:
+
+```
+check_store_digest_mailbox.py --require-restore \
+    --expect-raw-from-store <board store dump> --expect-write-count 2
+-> PASS schema=0x010100 blob_words=24 write_count=2 restore=yes
+```
+
+(`--expect-write-count` defaults to 1, which is right for a first-write smoke
+and wrong for every post-restore run — a restore-then-write cycle is legitimately
+2. Board recipe must pass the incremented value.)
+
+### Board-origin replay bundle
+
+The 40-word store window (`md 0x40001000 28`) was assembled by
+`host/assemble_replay_bundle.py --hex-words` into a `replay_bundle` 1.1.0 JSON
+carrying board-origin values only, and `host/verify_replay_bundle.py`
+**re-ran the C twin for both arms** (variant at `seed^0x4A4A`, random at
+`seed^0xBEEF`, budget 22078 taken from the bundle) — **PASS in 91.7 s**,
+matching raw genome, train score, hard holdout and graded holdout for both.
+A bundle built purely from words the board wrote reproduces both champions
+bit-exactly on the host.
+
+### Honest scope
+
+**Closed:** champion persistence across real power loss on real NV media
+(TF card, FAT); a replay bundle whose content originates on the board and
+independently replays; a write-budget counter that survives and increments
+across the restore (1 → 2).
+
+**Not closed / not claimed:** the store-digest firmware seeds the frozen Set B
+champion as a constant rather than earning it in the same session — the earning
+was already board-verified in the Set B run, and this drop deliberately
+separates persistence from search (it also made the image fit: 1 640 B vs the
+34 652 B search-carrying build against a 32 768 B IMEM). NV write endurance is
+not studied (one file, one write per run). The flush and the restore both go
+through U-Boot by design (S2), so this is not autonomous re-flush. The 4205 has
+no SD and would need `nand write` with the same record ABI — out of scope.
