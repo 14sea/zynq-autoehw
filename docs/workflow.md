@@ -66,6 +66,41 @@ not by denying the writer a tool.
   - `docs/board_results.md` — structured board observations: exact mailbox hex,
     pass/fail per vector, where/how it diverged.
 
+## Gate order — cheapest disqualifier first
+
+**Learned from the M1 engineering addendum (2026-08-01/02): five of the six
+blockers in that six-round campaign were invisible on the authoring side**, which
+has neither a RISC-V toolchain nor Vivado. Reviewing the diff first spent whole
+rounds on code that could not have built.
+
+So, on receiving any drop, run in this order and stop at the first failure:
+
+1. **Board-mode cross-compile** — ~30 s, and it is the single highest-yield
+   check. It catches mode-guard mismatches (round 4: helpers gated to another
+   mode, compiled fine under `AUTOEHW_HOST_STUB`) and IMEM overflow (round 5:
+   34 652 B against a 32 768 B ROM). Neither is visible to any host gate.
+2. **Host gate** — the author has already run it; reproduce it anyway, it is cheap.
+3. **Read the diff.**
+4. **Vivado OOC** for anything board-bound (rounds 1-3: a RAM-inference collapse
+   that behavioural simulation passes happily).
+5. **DFX build**, then **board**.
+
+Rounds 1-3 also produced a reusable RTL rule for `axil_framebuf`: **each RAM read
+must land in its own output register, with any half-select mux placed after the
+registers** — muxing before the register feeds one register from two memories and
+Vivado silently falls back to distributed RAM.
+
+## Division of labour is not fixed — it follows the toolchain
+
+The default (author writes code, Claude gates and boards) assumes the work is
+mostly host-side logic. **When a drop is inherently Vivado-centric, invert it:**
+Claude builds the infrastructure and the author writes schemas, host verifiers
+and known-answer fixtures against it.
+
+This applies to **M2's first drop** (extraction + per-bit-class certification),
+which is a Vivado specimen-diff activity end to end. Keeping the default split
+there would reproduce the addendum's round-trip ratio and make it worse.
+
 ## Claude's pre-commit checklist
 
 Run before every commit; all must pass:
