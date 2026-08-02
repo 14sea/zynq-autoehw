@@ -956,3 +956,72 @@ separates persistence from search (it also made the image fit: 1 640 B vs the
 not studied (one file, one write per run). The flush and the restore both go
 through U-Boot by design (S2), so this is not autonomous re-flush. The 4205 has
 no SD and would need `nand write` with the same record ABI — out of scope.
+
+---
+
+## ★ Timing-margin measurement — what the −19 ns WNS actually means (EBAZ4203, 2026-08-02)
+
+The routed design has always reported a large setup violation (WNS ≈ −17…−19 ns)
+while producing bit-exact results for hours on two different dice. This repo
+never explained why, and project memory carried a wrong explanation ("the BD
+declares FCLK high while we sign off at 50"). Both were resolved here — by
+reading the RTL, then by measuring on silicon.
+
+### The path is genuinely single-cycle — a multicycle constraint would be false
+
+`rtl/uart_stream_eval_core.v` state `S_VOTE` (lines 210-231) computes, inside one
+clock edge:
+
+```
+noise_state → lfsr_next → mod_u16_by_u6 (16-iteration restoring division)
+            → compare → majority vote → XOR → popcount8 → graded_score
+```
+
+`S_VOTE` executes on consecutive cycles, so the launch register updates every
+cycle. The routed path detail confirms the analyzer is describing real logic
+(61 levels: 36 CARRY4 + 25 LUTs, all inside `pblock_rp`, named
+`ones[2]_i_2xx` — the divider's comparator chain). **The earlier hypothesis that
+this path is functionally multi-cycle is falsified; declaring
+`set_multicycle_path` here would be a false constraint hiding a real path.**
+
+### Measured margin (`scripts/board_freq_margin.py`)
+
+FCLK0 is runtime-settable from U-Boot, and the graded smoke drives exactly this
+datapath with 8 known-answer vectors, so the real limit can simply be measured:
+
+| FCLK0 | period | graded smoke |
+|---|---|---|
+| 50.0 MHz | 20.00 ns | **PASS** 8/8 bit-exact (twice) |
+| 57.1 MHz | 17.50 ns | **PASS** 8/8 bit-exact |
+| 61.5 MHz | 16.25 ns | **FAIL** — and *non-deterministically*: vector 5 came back +17 on one run and +32 on the next |
+| 66.7 MHz | 15.00 ns | **FAIL** (deltas +1/+1/+17/+1/+6, one hard bit flipped) |
+
+The non-determinism is the decisive discriminator: a logic bug reproduces the
+same wrong value, a timing violation does not.
+
+**So the real critical path on this die at room temperature is between 16.25 and
+17.50 ns, against a 20 ns period — roughly 13-19 % margin at 50 MHz — while the
+slow-corner report claims 39.09 ns, i.e. it is about 2.3× pessimistic here.**
+
+This also explains the old EHW-5.2 failures at 125 MHz (8 ns period against a
+~17 ns path — far past the cliff), which were previously attributed only to
+"signoff at 50".
+
+### What this changes
+
+- **Historical results stand.** Every board result in this repo was produced at
+  50 MHz, where the design demonstrably computes correctly — now with a measured
+  margin, on two dice, over ~10¹¹ evaluations.
+- **The design is still not signoff-clean, and that matters going forward.** The
+  15 %-ish margin is measured at room temperature on one die; the slow corner
+  exists precisely to cover temperature, voltage and process spread, and we have
+  no evidence about any of them. Margin is also a *per-build* property — each
+  rebuild re-rolls placement, so passing is re-gambled every time.
+- **Recommended fix before any milestone reuses this evaluator:** pipeline
+  `mod_u16_by_u6`. The 16-iteration restoring-division chain *is* the whole
+  61-level path; splitting it into ~4 registered stages should bring WNS
+  positive. It changes cycles-per-vote, hence throughput and any budget derived
+  from measured eps — so it needs fresh goldens, and it must not change the
+  arithmetic. A zero-RTL alternative is to run at 25 MHz for ~2× margin at half
+  the throughput.
+- Do **not** paper over it with a multicycle exception (see above).
