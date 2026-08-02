@@ -328,11 +328,19 @@ addendum, tag `m1-eng-complete`):
   both arms.
 - Optionally clean up confirm-firmware bookkeeping that evaluated island-local
   holdout data then discarded it for the frozen final-report ABI.
-- Still open, and separate from the addendum: the routed design reports
-  WNS ≈ −19 ns against a real 50 MHz constraint on a pre-existing `eval_core`
-  path. Every board result is bit-exact regardless, across two dice, but the
-  reason is not demonstrated anywhere — the likely multicycle nature of that path
-  should be established and constrained rather than left as folklore.
+- **Resolved 2026-08-02, and the answer was not the expected one.** The routed
+  design reports WNS ≈ −19 ns against a real 50 MHz constraint on a pre-existing
+  `eval_core` path. The path is **genuinely single-cycle** — the multicycle
+  hypothesis is falsified, and such a constraint would be false. Measurement on
+  silicon (`scripts/board_freq_margin.py`, details in `docs/board_results.md`):
+  the design passes the 8-vector graded known-answer test at 50.0 and 57.1 MHz
+  and fails non-deterministically at 61.5 and 66.7 MHz, so the real path is
+  16.25–17.50 ns against a 20 ns period — about **13–19 % margin**, with the
+  slow-corner report ~2.3× pessimistic. Historical results stand (all at 50 MHz,
+  two dice, ~10¹¹ evaluations). **Still open as engineering:** that margin is
+  room-temperature, single-die, and re-rolled by every placement, so the
+  16-iteration restoring-division chain should be pipelined before any milestone
+  reuses this evaluator.
 
 ---
 
