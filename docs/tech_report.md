@@ -31,6 +31,14 @@ logging replayable evidence, recovering from bad candidates without a power
 cycle, and beating a random-search baseline on a **held-out** stimulus
 distribution?* That is a systems + generalization claim, not a mechanism claim.
 
+> **2026-11-03 prior-art note.** "No PC choosing candidates or scoring fitness" and
+> multi-hour on-chip runs are **not new in the literature** (Upegui & Sanchez 2006;
+> Cancare et al. 2010–12, up to 79.2 h on average; ZyEHW 2013–15 on Zynq-7020), and
+> held-out evaluation and hypothesis tests on silicon also have precedents. The layer
+> not found in the 2026-11 review is the evidence package: pre-registration, an
+> equal-budget random-sampling baseline, bit-identical reproduction on a second die,
+> and persistent champion + write budget + trajectory replay. See `docs/PRIOR_ART.md`.
+
 ---
 
 ## 1. Claims ledger
@@ -47,7 +55,7 @@ is distinct from `zynq-ehw`, and its falsification test. These mirror
 | **B — map-guided evolution** | **NOT TESTED in M1.** | None claimed. | Reserved for M2/local-map work. Current M1 result is search over a constrained genome, not a learned device-local map. |
 | **C — held-out improvement** | **PASS for the M1 beats-random holdout subclaim on one benchmark/regime.** The final pre-registered Set B board run beat equal-budget random on 1024-frame hard holdout by `+113/1024`. | `docs/prereg_search_v9_graded_islands.md`, `docs/screening_v9_results.md`, `docs/v9_setb_confirm_golden.md`, and `docs/board_results.md`. | The broad Claim C wording still requires careful scope: this is one UART-like benchmark family, one budget regime, and the winning condition was discovered as graded train signal + K=8 PBIL islands through v3-v9 screening. It is not a claim of cross-device, cross-task, or adversarial-set generalization. |
 
-### Claim A — Autonomous runtime is new work
+### Claim A — Autonomous runtime is new work (relative to zynq-ehw; see `docs/PRIOR_ART.md` for the literature)
 
 > A single EBAZ4205 board can run a multi-hour evolutionary-hardware loop with no
 > PC in the decision loop, preserving persistent champions, replayable logs, and
@@ -148,9 +156,13 @@ must report against these baselines on the **same evaluation budget** and the
 |---|---|---|
 | **Thompson 1996** (XC6200 tone discriminator) | intrinsic direct-bitstream evolution on a documented part; exploited analog/physical device quirks | we stay **digital + contention-safe** (LUT-INIT / local-select / VRC / whitelisted templates); no physics exploitation, no cross-chip-fragile phenotypes |
 | **Whitley et al., ISAL'21** (*Resurrecting FPGA Intrinsic Analog EHW*) | intrinsic analog evolution; evolved circuits die on sibling chips | we explicitly reject the analog/physics path; determinism + replayability are core claims, the opposite trade |
-| **CoBEA, Hoffmann et al., GECCO'22** | framework for direct iCE40 bitstream manipulation, ~130× faster reconfig; names "Xilinx 7-series + DPR" as *future work* | we run on the **7-series part they named but did not target**, via prjxray bit-location + on-chip ICAP under a running soft-core (self-reconfiguring, not host+MCU rig). Borrowed: non-zero seed search, plateau-aware fitness, one-resident-process/diff-frames, CSV/HDF5 logs |
+| **CoBEA, Hoffmann et al., GECCO'22** | framework for direct iCE40 bitstream manipulation, ~130× faster reconfig; names "Xilinx 7-series + DPR" as *future work* | we run on the **7-series part they named but did not target**, via prjxray bit-location + on-chip ICAP under a running soft-core — but self-reconfiguring Zynq-7000 EHW already existed (ZyEHW, García 2020; rows below). Borrowed: non-zero seed search, plateau-aware fitness, one-resident-process/diff-frames, CSV/HDF5 logs |
 | **prjxray / prjtrellis** | open bitstream *databases* built by exhaustive fuzzing | we do **not** aim to complete a family DB; we build a **device-local** map (behavioral where unsymbolized), and treat prjxray as an inherited bit-location layer only |
 | **Cyclone_CRAM_Mapper** (sibling, silicon-validated) | non-prjxray symbolic CRAM/LUT/route map + FASM/RBF toolchain + per-pip validation gate on Cyclone IV | shares the **map/log/replay vocabulary** this report defines, but its RBF/EPCS transport and recovery mechanics stay in a *separate* repo (`cyclone-fabric-cartographer`); its key lesson — single routes are mined but **composition** is the hazard — is imported directly into our safety model |
+| **Upegui & Sanchez 2006; Cancare et al. 2010–12** *(added 2026-11-03)* | on-chip MicroBlaze / PowerPC rewrites real LUTs via ICAP per evaluation, fitness on chip; Cancare: 26-bit parity averaged 79.2 h, 75/25 holdout | PC-free on-chip evolution, long runs and holdout are **not new**; we add pre-registration, equal-budget random sampling and cross-die bit-identical reproduction |
+| **Dobai & Sekanina, ZyEHW 2013–15** *(added 2026-11-03)* | Zynq-7020: EA on the ARM PS, fitness in PL, PCAP difference-based LUT DPR + VRC, 8,700–30,000 candidates/s, 30-run quartiles; host tools recompute champion fitness from a seed | same chip family and PC-free loop; we differ in persistence + write budget, trajectory replay, quantified holdout vs equal-budget random, cross-die reproduction |
+| **Garnica, Glette, Torresen, GPEM 2018** *(added 2026-11-03)* | Zynq-7020: three on-chip EA implementations; 20 runs per setting with t-test / ANOVA | hypothesis tests on silicon are **not new**; pre-registration and a random-sampling baseline are |
+| **Thompson & Layzell, ICES 2000** *(added 2026-11-03)* | robustness across 4 chips, two foundries, −27…60 °C, 4.75–5.25 V | broader physical robustness than our 2 dies at room temperature; we add bit-identical *digital* reproduction |
 | **zynq-ehw v1.2.0** (direct predecessor) | board-verified EHW-0..5.5 mechanism ladder; all same-set metrics; PC-orchestrated short runs | we inherit every mechanism and add the **runtime + holdout-generalization** layer that ladder deliberately did not claim |
 
 ### 2.3 The distinctness test (M0 KILL criterion)
@@ -159,21 +171,27 @@ must report against these baselines on the **same evaluation budget** and the
 from already completed EHW-2/3.4/5.x work." The table below is the explicit
 distinctness ledger:
 
-| Property | zynq-ehw (done) | zynq-autoehw (new) |
-|---|---|---|
-| Per-eval on-chip ICAPE2 reconfiguration | ✅ EHW-2/3.4 | inherited, not re-claimed |
-| Live ICAP LUT-INIT edit, no reset | ✅ EHW-0.5/1.2/3.3/5.5 | inherited |
-| GA×HW-SGD memetic loop on-chip | ✅ EHW-4/5 | inherited |
-| PC out of candidate-selection loop | partial (board GA) | **required + fitness also on-board** |
-| Multi-hour run | ❌ | **claimed (Claim A)** |
-| Persistent champion + write budget | ❌ | **claimed (Claim A)** |
-| Self-recovery without power cycle | ❌ (power-cycled once) | **claimed (Claim A)** |
-| Post-run replay bundle | ❌ | **claimed (Claim A)** |
-| Device-local map guiding selection | ❌ (fixed substrates) | **claimed (Claim B)** |
-| Held-out generalization | ❌ (same-set, stated) | **claimed (Claim C)** |
+| Property | zynq-ehw (done) | zynq-autoehw (new) | Literature (2026-11 review, `docs/PRIOR_ART.md`) |
+|---|---|---|---|
+| Per-eval on-chip ICAPE2 reconfiguration | ✅ EHW-2/3.4 | inherited, not re-claimed | precedent (Upegui 2006, ZyEHW) |
+| Live ICAP LUT-INIT edit, no reset | ✅ EHW-0.5/1.2/3.3/5.5 | inherited | precedent |
+| GA×HW-SGD memetic loop on-chip | ✅ EHW-4/5 | inherited | not searched |
+| PC out of candidate-selection loop | partial (board GA) | **required + fitness also on-board** | **precedent** (Upegui, Cancare, ZyEHW, Garnica) |
+| Multi-hour run | ❌ | **claimed (Claim A)** | **precedent** (Cancare, 79.2 h average) |
+| Persistent champion + write budget | ❌ | **claimed (Claim A)** | not found |
+| Self-recovery without power cycle | ❌ (power-cycled once) | **claimed (Claim A)** | partial (Thompson & Layzell periodic reset; Garvie rollback, simulated) |
+| Post-run replay bundle | ❌ | **claimed (Claim A)** | partial (ZyEHW champion recompute); trajectory replay not found |
+| Device-local map guiding selection | ❌ (fixed substrates) | **claimed (Claim B)** | partial (guided mutation in simulation: SOMO etc.); on-silicon device map not found |
+| Held-out generalization | ❌ (same-set, stated) | **claimed (Claim C)** | **precedent** (Cancare, Salvador TC 2013); quantified + pre-registered vs equal-budget random not found |
 
 If a proposed M1 experiment lands only in the top three rows, it is **not** a new
 claim and must be reworked or the milestone HELD.
+
+**2026-11-03:** the fourth column was added after the prior-art review. By the same
+rule applied to the literature, the PC-free, multi-hour and holdout rows are new only
+relative to `zynq-ehw`; externally the contribution is the evidence package (pre-
+registration, equal-budget random sampling, cross-die bit-identical reproduction,
+persistence + trajectory replay), not those properties themselves.
 
 ---
 

@@ -30,6 +30,14 @@ The result is deliberately scoped: one UART-like benchmark family, one measured
 budget regime, one pre-registered Set B confirmation after a 16-seed Set A
 screen. It is not a claim of cross-benchmark transfer or a local-map result.
 
+**Prior art (2026-11 review).** PC-free on-chip evolution with on-board fitness,
+multi-hour on-chip runs, held-out evaluation and hypothesis tests on silicon were all
+published before (Upegui & Sanchez 2006; Cancare et al. 2010–12; ZyEHW 2013–15 on
+Zynq-7020; Garnica et al. 2018). What this repo adds is the evidence package:
+pre-registration, an equal-budget random-sampling baseline, bit-identical reproduction
+on a second die, and persistent champion + write budget + trajectory replay. Details
+in [`docs/PRIOR_ART.md`](docs/PRIOR_ART.md).
+
 ## Claim Status
 
 | Claim | M1 status |
