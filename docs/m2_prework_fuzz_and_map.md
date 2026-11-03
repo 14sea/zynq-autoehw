@@ -79,7 +79,11 @@ best-tested rules in the prjxray ecosystem. Zynq7-specific data all present:
 
 What zynq7 actually lacks vs artix7 (full diff of file lists):
 - **GTP transceivers + PCIe** — the 7z010 die has neither. Irrelevant.
-- **XADC MONITOR tile jsons** — die has XADC; evolution never touches it.
+- ~~**XADC MONITOR tile jsons** — die has XADC; evolution never touches it.~~
+  *(Corrected 2026-11-03: zynq7 does have them, under different names —
+  `tile_type_MONITOR_{BOT,MID,TOP}_PELE1.json` instead of artix7's
+  `tile_type_MONITOR_{BOT,MID,TOP}.json` — so a file-name diff reports them as
+  missing. Nothing downstream depended on this line.)*
 - **`cells_data/`** — techmap metadata for `fasm2bels` (netlist back-inference
   only). Not needed.
 - **`gridinfo/`, `harness/`** — ROI harnesses; we have our own DFX flow.
@@ -136,6 +140,13 @@ NOT TESTED. The fuzz/evolve fusion is its implementation space:
    operator. Thompson's 1996 observation made systematic; CoBEA did not do this
    (it used the known iCE40 db). "Device autonomously mines and validates its
    own map" appears to be unclaimed territory.
+   *(Qualified 2026-11-03, see `docs/PRIOR_ART.md`: feeding knowledge from search
+   back into the mutation operator is **not** new in simulation — SOMO (Hodaň et al.
+   2020/2021) uses circuit semantics, Galeta & Sekanina (CEC 2026) train a
+   transformer on CGP chromosomes, and Hurta et al. (2026) train an ML operator on
+   11 million mutation records from earlier CGP runs. What was not found in the
+   2026-11 search is a map mined and validated **by the device on silicon** and used
+   that way.)*
 
 Safety split: levels 2/3 restricted to **content-bit classes** (LUT INIT, FF
 init — worst case is functional garbage, not contention) run on EBAZ = M2.

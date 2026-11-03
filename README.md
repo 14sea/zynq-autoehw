@@ -144,6 +144,6 @@ zynq-ehw v1.2.0
         v
 M0  claims contract, schemas, benchmark package
 M1  autonomous Zynq runtime + held-out beats-random gate  [DONE: m1-complete]
-M2  device-local map guidance and safe ICAP/LUT evolution [NEXT]
-M3  open-routing work on sacrificial 7-series hardware
+M2  device-local map guidance and safe ICAP/LUT evolution [MOVED: zynq-fabricmap]
+M3  open-routing work on sacrificial 7-series hardware      [ON HOLD]
 ```
